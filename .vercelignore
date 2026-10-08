@@ -1,0 +1,7 @@
+# Not part of the deployed API
+dist
+node_modules
+*.zip
+.env
+.env.*
+!.env.example
