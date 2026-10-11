@@ -5,7 +5,7 @@ import { validateRequest } from "../../middlewares/validate.middleware";
 import { AuthController } from "./auth.controller";
 import { claimSeatSchema, resendOtpSchema, verifyOtpSchema } from "./auth.validation";
 
-const router = Router();
+const router: Router = Router();
 
 router.post(
   "/claim-seat",

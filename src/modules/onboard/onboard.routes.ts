@@ -4,7 +4,7 @@ import { validateRequest } from "../../middlewares/validate.middleware";
 import { OnboardController } from "./onboard.controller";
 import { part1DraftSchema, part1SubmitSchema, part2SurveySchema } from "./onboard.validation";
 
-const router = Router();
+const router: Router = Router();
 
 router.use(authenticateJwt);
 

@@ -4,7 +4,7 @@ import { validateRequest } from "../../middlewares/validate.middleware";
 import { QuizController } from "./quiz.controller";
 import { answerQuestionSchema } from "./quiz.validation";
 
-const router = Router();
+const router: Router = Router();
 
 router.use(authenticateJwt);
 

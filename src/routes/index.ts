@@ -11,7 +11,7 @@ import { quizRoutes } from "../modules/quiz/quiz.routes";
 import { settingsRoutes } from "../modules/settings/settings.routes";
 import { walletRoutes } from "../modules/wallet/wallet.routes";
 
-const router = Router();
+const router: Router = Router();
 
 router.use("/auth", authRoutes);
 router.use("/profile", profileRoutes);

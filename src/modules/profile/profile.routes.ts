@@ -4,7 +4,7 @@ import { validateRequest } from "../../middlewares/validate.middleware";
 import { ProfileController } from "./profile.controller";
 import { updateProfileSchema } from "./profile.validation";
 
-const router = Router();
+const router: Router = Router();
 
 router.use(authenticateJwt);
 

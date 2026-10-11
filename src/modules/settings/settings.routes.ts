@@ -4,7 +4,7 @@ import { validateRequest } from "../../middlewares/validate.middleware";
 import { SettingsController } from "./settings.controller";
 import { updateSettingsSchema } from "./settings.validation";
 
-const router = Router();
+const router: Router = Router();
 
 router.use(authenticateJwt);
 

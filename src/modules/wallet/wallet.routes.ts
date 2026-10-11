@@ -4,7 +4,7 @@ import { validateRequest } from "../../middlewares/validate.middleware";
 import { WalletController } from "./wallet.controller";
 import { connectWalletSchema } from "./wallet.validation";
 
-const router = Router();
+const router: Router = Router();
 
 router.use(authenticateJwt);
 

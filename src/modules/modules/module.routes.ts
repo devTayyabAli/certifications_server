@@ -2,7 +2,7 @@ import { Router } from "express";
 import { authenticateJwt } from "../../middlewares/auth.middleware";
 import { ModuleController } from "./module.controller";
 
-const router = Router();
+const router: Router = Router();
 
 // Public calendar & speaker endpoints
 router.get("/cms/speakers", ModuleController.getCmsSpeakers);

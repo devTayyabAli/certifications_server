@@ -2,7 +2,7 @@ import { Router } from "express";
 import { authenticateJwt } from "../../middlewares/auth.middleware";
 import { BadgeController } from "./badge.controller";
 
-const router = Router();
+const router: Router = Router();
 
 router.use(authenticateJwt);
 

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { PartnerController } from "./partner.controller";
 
-const router = Router();
+const router: Router = Router();
 
 router.get("/", PartnerController.getPartners);
 router.get("/more-ways", PartnerController.getMoreWays);

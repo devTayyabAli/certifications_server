@@ -5,7 +5,7 @@ import { validateRequest } from "../../middlewares/validate.middleware";
 import { CertificateController } from "./certificate.controller";
 import { recordMintSchema } from "./certificate.validation";
 
-const router = Router();
+const router: Router = Router();
 
 // Public verification route (no auth required), rate-limited against code guessing
 router.get("/verify/:identifier", publicLookupRateLimiter, CertificateController.verifyPublic);

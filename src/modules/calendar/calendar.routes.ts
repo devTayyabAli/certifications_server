@@ -2,7 +2,7 @@ import { Router } from "express";
 import { authenticateJwt } from "../../middlewares/auth.middleware";
 import { CalendarController } from "./calendar.controller";
 
-const router = Router();
+const router: Router = Router();
 
 // Public ICS file downloads & calendar link generation
 router.get("/session/:sessionId", CalendarController.downloadSessionIcs);
