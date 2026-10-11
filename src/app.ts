@@ -51,17 +51,17 @@ export function createApp(options: { connectOnRequest?: boolean } = {}): Applica
     }
     next();
   });
-  app.use(
-    cors({
-      origin: (origin, callback) => callback(null, !origin || isAllowedOrigin(origin)),
-      // Auth is a Bearer token, not cookies — never send credentials cross-site
-      credentials: false,
-      methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-      allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
-      exposedHeaders: ["RateLimit", "RateLimit-Policy", "Retry-After"],
-      maxAge: 600, // cache preflights for 10 minutes
-    })
-  );
+  // app.use(
+  //   cors({
+  //     origin: (origin, callback) => callback(null, !origin || isAllowedOrigin(origin)),
+  //     // Auth is a Bearer token, not cookies — never send credentials cross-site
+  //     credentials: false,
+  //     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  //     allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+  //     exposedHeaders: ["RateLimit", "RateLimit-Policy", "Retry-After"],
+  //     maxAge: 600, // cache preflights for 10 minutes
+  //   })
+  // );
 
   // 3. Rate limiting protection (per IP)
   app.use(generalRateLimiter);
