@@ -40,17 +40,31 @@ export function createApp(options: { connectOnRequest?: boolean } = {}): Applica
     })
   );
 
-  // 2. CORS: only the app's own origins. Browsers from any other site get a
-  //    clear 403 instead of a confusing server error. Requests without an
-  //    Origin (server-to-server, calendar apps, curl) carry no browser
-  //    credentials and are allowed through.
-  app.use((req, res, next) => {
-    const origin = req.headers.origin;
-    if (origin && !isAllowedOrigin(origin)) {
-      return ApiResponse.error(res, 403, "This origin is not allowed to use the Si Her DeFi API.");
-    }
-    next();
-  });
+  // 2. CORS — TEMPORARY FOR TESTING: every origin may call the API.
+  //    Auth is a Bearer token, not cookies, so no browser credentials are sent.
+  //    TODO: restore the origin allow-list below before going live.
+  app.use(
+    cors({
+      origin: "*",
+      credentials: false,
+      methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+      allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+      exposedHeaders: ["RateLimit", "RateLimit-Policy", "Retry-After"],
+      maxAge: 600,
+    })
+  );
+
+  // Origin allow-list (disabled while testing). To restore: remove the cors()
+  // call above and uncomment this block. Browsers from any other site get a
+  // clear 403; requests without an Origin (server-to-server, calendar apps,
+  // curl) carry no browser credentials and are allowed through.
+  // app.use((req, res, next) => {
+  //   const origin = req.headers.origin;
+  //   if (origin && !isAllowedOrigin(origin)) {
+  //     return ApiResponse.error(res, 403, "This origin is not allowed to use the Si Her DeFi API.");
+  //   }
+  //   next();
+  // });
   // app.use(
   //   cors({
   //     origin: (origin, callback) => callback(null, !origin || isAllowedOrigin(origin)),
