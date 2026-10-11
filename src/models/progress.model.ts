@@ -18,6 +18,18 @@ export interface IQuizAttempt {
   }[];
   attemptedAt: Date;
   completedAt?: Date;
+  /**
+   * Set when the learner started over after using every attempt: the
+   * attempt stays on record but no longer counts toward the current set.
+   */
+  archived?: boolean;
+}
+
+/** A quiz the learner skipped after using every attempt: no badge, but the module counts as done. */
+export interface ISkippedQuiz {
+  quiz: Types.ObjectId;
+  module: Types.ObjectId;
+  skippedAt: Date;
 }
 
 export interface IEarnedBadge {
@@ -33,6 +45,7 @@ export interface IUserProgress extends Document {
   completedModules: Types.ObjectId[];
   earnedBadges: IEarnedBadge[];
   quizAttempts: IQuizAttempt[];
+  skippedQuizzes: ISkippedQuiz[];
   hasPassedPrerequisiteForCertificate: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -78,6 +91,14 @@ const userProgressSchema = new Schema<IUserProgress>(
         ],
         attemptedAt: { type: Date, default: Date.now },
         completedAt: { type: Date },
+        archived: { type: Boolean },
+      },
+    ],
+    skippedQuizzes: [
+      {
+        quiz: { type: Schema.Types.ObjectId, ref: "Quiz", required: true },
+        module: { type: Schema.Types.ObjectId, ref: "Module", required: true },
+        skippedAt: { type: Date, default: Date.now },
       },
     ],
     hasPassedPrerequisiteForCertificate: {

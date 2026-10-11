@@ -24,34 +24,39 @@ function isCompletedAttempt(a: IQuizAttempt) {
   return a.status !== "in_progress";
 }
 
-function attemptsFor(progress: IUserProgress | null, quiz: IQuiz) {
+/** Every attempt at this quiz, including ones set aside by starting over. */
+function allAttemptsFor(progress: IUserProgress | null, quiz: IQuiz) {
   return (progress?.quizAttempts ?? []).filter((a) => a.quiz.toString() === quiz._id.toString());
 }
 
+/** The attempts in the current set (starting over sets the earlier ones aside). */
+function attemptsFor(progress: IUserProgress | null, quiz: IQuiz) {
+  return allAttemptsFor(progress, quiz).filter((a) => !a.archived);
+}
+
+function isSkipped(progress: IUserProgress | null, quiz: IQuiz) {
+  return (progress?.skippedQuizzes ?? []).some((s) => s.quiz.toString() === quiz._id.toString());
+}
+
 /**
- * Attempts come in rounds of `maxAttempts`. When a round is used up without a
- * pass, the quiz rests for `retryAfterHours` (time to rewatch), then a fresh
- * round opens. `retryAfterHours = 0` keeps it closed for good.
+ * The learner gets `maxAttempts` attempts. Once they're used without a pass
+ * there is no waiting period: the learner either starts over with a fresh set
+ * (`restart`) or skips the quiz without the badge (`skip`).
+ * `retryAvailableAt` is always null and kept only for API compatibility.
  */
-export function roundState(attempts: IQuizAttempt[], quiz: IQuiz, now = new Date()) {
+export function roundState(attempts: IQuizAttempt[], quiz: IQuiz) {
   const max = Math.max(quiz.maxAttempts, 1);
-  const total = attempts.length;
-  if (total === 0) return { usedInRound: 0, remaining: max, retryAvailableAt: null as Date | null };
+  const usedInRound = Math.min(attempts.length, max);
+  return { usedInRound, remaining: max - usedInRound, retryAvailableAt: null as Date | null };
+}
 
-  const usedInRound = ((total - 1) % max) + 1;
-  const hasOpenAttempt = attempts.some((a) => !isCompletedAttempt(a));
-  if (usedInRound < max || hasOpenAttempt) {
-    return { usedInRound, remaining: max - usedInRound, retryAvailableAt: null as Date | null };
-  }
-
-  // The round is used up
-  const retryHours = quiz.retryAfterHours ?? 24;
-  if (!retryHours) return { usedInRound: max, remaining: 0, retryAvailableAt: null as Date | null };
-  const last = attempts[total - 1];
-  const retryAt = new Date((last.completedAt ?? last.attemptedAt).getTime() + retryHours * 60 * 60 * 1000);
-  return now >= retryAt
-    ? { usedInRound: 0, remaining: max, retryAvailableAt: null as Date | null }
-    : { usedInRound: max, remaining: 0, retryAvailableAt: retryAt };
+/** Out of attempts: every attempt in the set is used, none is still open, and none passed. */
+function isOutOfAttempts(attempts: IQuizAttempt[], quiz: IQuiz) {
+  return (
+    roundState(attempts, quiz).remaining === 0 &&
+    !attempts.some((a) => !isCompletedAttempt(a)) &&
+    !attempts.some((a) => a.passed)
+  );
 }
 
 function hintFor(q: IQuizQuestion | undefined) {
@@ -111,7 +116,7 @@ export class QuizService {
     const attempts = attemptsFor(progress, quiz);
     const completed = attempts.filter(isCompletedAttempt);
     const open = attempts.find((a) => !isCompletedAttempt(a)) ?? null;
-    const passedAttempt = completed.find((a) => a.passed) ?? null;
+    const passedAttempt = allAttemptsFor(progress, quiz).find((a) => a.passed) ?? null;
     const lastCompleted = completed[completed.length - 1] ?? null;
     const round = roundState(attempts, quiz);
     const state = sessionState(moduleDoc);
@@ -129,8 +134,10 @@ export class QuizService {
       attemptsUsed: round.usedInRound,
       attemptsRemaining: round.remaining,
       retryAvailableAt: round.retryAvailableAt,
-      retryAfterHours: quiz.retryAfterHours ?? 24,
+      retryAfterHours: 0,
       isPassed: !!passedAttempt,
+      // Skipped after every attempt: no badge, but the module counts as done
+      isSkipped: !passedAttempt && isSkipped(progress, quiz),
       badge: { name: quiz.badgeRewardName, image: quiz.badgeRewardImage },
       // Questions and options only — the correct option never leaves the server
       questions: quiz.questions.map((q) => ({
@@ -165,8 +172,11 @@ export class QuizService {
       new UserProgress({ user: userId, completedModules: [], earnedBadges: [], quizAttempts: [] });
 
     const attempts = attemptsFor(progress, quiz);
-    if (attempts.some((a) => a.passed)) {
+    if (allAttemptsFor(progress, quiz).some((a) => a.passed)) {
       throw ApiError.conflict("You've already passed this quiz.");
+    }
+    if (isSkipped(progress, quiz)) {
+      throw ApiError.conflict("You skipped this quiz. Start it over to take it again.");
     }
 
     let attempt = attempts.find((a) => !isCompletedAttempt(a));
@@ -174,14 +184,12 @@ export class QuizService {
       const round = roundState(attempts, quiz);
       if (round.remaining === 0) {
         throw ApiError.badRequest(
-          round.retryAvailableAt
-            ? `You've used all ${quiz.maxAttempts} attempts for now. Rewatch the session — you can try again after ${round.retryAvailableAt.toUTCString()}.`
-            : `You've used all ${quiz.maxAttempts} attempts for this quiz. Please reach out to the Si Her team.`
+          `You've used all ${quiz.maxAttempts} attempts. Start over for a fresh set, or skip this quiz without the badge.`
         );
       }
       progress.quizAttempts.push({
         quiz: quiz._id as Types.ObjectId,
-        attemptNumber: attempts.length + 1,
+        attemptNumber: allAttemptsFor(progress, quiz).length + 1,
         status: "in_progress",
         score: 0,
         passed: false,
@@ -250,5 +258,61 @@ export class QuizService {
           }
         : null,
     };
+  }
+
+  /**
+   * Out of attempts (or skipped): start over with a fresh set. Earlier
+   * attempts stay on record but stop counting. A module already counted as
+   * done stays done; starting over only gives another chance at the badge.
+   */
+  static async restartQuiz(moduleSlugOrId: string, userId: Types.ObjectId) {
+    await OnboardService.assertPart1Complete(userId);
+    const moduleDoc = await findPublishedModule(moduleSlugOrId);
+    const quiz = await loadQuiz(moduleDoc);
+    if (!isQuizOpen(sessionState(moduleDoc))) {
+      throw ApiError.forbidden("This quiz opens after the live session.");
+    }
+
+    const progress = await UserProgress.findOne({ user: userId });
+    const attempts = attemptsFor(progress, quiz);
+    if (!progress || (!isOutOfAttempts(attempts, quiz) && !isSkipped(progress, quiz))) {
+      throw ApiError.conflict("You still have attempts left.");
+    }
+
+    for (const a of progress.quizAttempts) {
+      if (a.quiz.toString() === quiz._id.toString()) a.archived = true;
+    }
+    progress.skippedQuizzes = progress.skippedQuizzes.filter((s) => s.quiz.toString() !== quiz._id.toString());
+    await progress.save();
+
+    return QuizService.getQuizByModule(moduleSlugOrId, userId);
+  }
+
+  /**
+   * Out of attempts: skip this week's quiz. No badge, but the module counts
+   * as done for the certificate (and unlocks it if this is the certificate
+   * module). The quiz can be started over later.
+   */
+  static async skipQuiz(moduleSlugOrId: string, userId: Types.ObjectId) {
+    await OnboardService.assertPart1Complete(userId);
+    const moduleDoc = await findPublishedModule(moduleSlugOrId);
+    const quiz = await loadQuiz(moduleDoc);
+
+    const progress = await UserProgress.findOne({ user: userId });
+    if (!progress || !isOutOfAttempts(attemptsFor(progress, quiz), quiz)) {
+      throw ApiError.conflict("You still have attempts left.");
+    }
+
+    if (!isSkipped(progress, quiz)) {
+      progress.skippedQuizzes.push({
+        quiz: quiz._id as Types.ObjectId,
+        module: moduleDoc._id as Types.ObjectId,
+        skippedAt: new Date(),
+      });
+    }
+    await ModuleService.recordCompletion(progress, moduleDoc, userId);
+    await progress.save();
+
+    return QuizService.getQuizByModule(moduleSlugOrId, userId);
   }
 }

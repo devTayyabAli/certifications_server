@@ -23,4 +23,14 @@ export class QuizController {
       data: result,
     });
   });
+
+  static restart = asyncHandler(async (req: Request, res: Response) => {
+    const quiz = await QuizService.restartQuiz(req.params.moduleId, req.user!._id);
+    return ApiResponse.success(res, { message: "Quiz started over", data: quiz });
+  });
+
+  static skip = asyncHandler(async (req: Request, res: Response) => {
+    const quiz = await QuizService.skipQuiz(req.params.moduleId, req.user!._id);
+    return ApiResponse.success(res, { message: "Quiz skipped — no badge", data: quiz });
+  });
 }

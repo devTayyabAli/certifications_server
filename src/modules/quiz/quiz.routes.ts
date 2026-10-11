@@ -10,5 +10,7 @@ router.use(authenticateJwt);
 
 router.get("/:moduleId", QuizController.getQuiz);
 router.post("/:moduleId/answer", validateRequest({ body: answerQuestionSchema }), QuizController.answer);
+router.post("/:moduleId/restart", QuizController.restart);
+router.post("/:moduleId/skip", QuizController.skip);
 
 export const quizRoutes = router;

@@ -50,17 +50,21 @@ function speakerItem(s: CmsSpeaker) {
 
 function quizSummary(quiz: IQuiz | undefined, progress: IUserProgress | null, open: boolean) {
   if (!quiz || !quiz.isActive || quiz.questions.length === 0) {
-    return { available: false, questionCount: 0, maxAttempts: 0, attemptsUsed: 0, isPassed: false, isOpen: false };
+    return { available: false, questionCount: 0, maxAttempts: 0, attemptsUsed: 0, isPassed: false, isSkipped: false, isOpen: false };
   }
   const attempts = (progress?.quizAttempts ?? []).filter((a) => a.quiz.toString() === quiz._id.toString());
+  const isPassed = attempts.some((a) => a.passed);
   return {
     available: true,
     isOpen: open,
     questionCount: quiz.questions.length,
     passingScore: quiz.passingScore,
     maxAttempts: quiz.maxAttempts,
-    attemptsUsed: attempts.length,
-    isPassed: attempts.some((a) => a.passed),
+    // Attempts in the current set (starting over sets the earlier ones aside)
+    attemptsUsed: Math.min(attempts.filter((a) => !a.archived).length, quiz.maxAttempts),
+    isPassed,
+    // Skipped after every attempt: no badge, but the module counts as done
+    isSkipped: !isPassed && (progress?.skippedQuizzes ?? []).some((s) => s.quiz.toString() === quiz._id.toString()),
   };
 }
 

@@ -38,6 +38,7 @@ async function main() {
   console.log(`  completed modules: ${progress?.completedModules.length ?? 0}`);
   console.log(`  badges:            ${progress?.earnedBadges.map((b) => b.badgeId).join(", ") || "none"}`);
   console.log(`  quiz attempts:     ${progress?.quizAttempts.length ?? 0}`);
+  console.log(`  skipped quizzes:   ${progress?.skippedQuizzes?.length ?? 0}`);
   console.log(`  certificate:       ${certificate?.status ?? "none"}`);
 
   if (certificate?.status === "minted") {
@@ -52,6 +53,7 @@ async function main() {
     progress.completedModules = [];
     progress.earnedBadges = [];
     progress.quizAttempts = [];
+    progress.skippedQuizzes = [];
     progress.hasPassedPrerequisiteForCertificate = false;
     await progress.save();
   }
