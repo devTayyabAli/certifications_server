@@ -97,7 +97,7 @@ export class AuthService {
     });
 
     // Dispatch real email via Loops.so
-    const loopsResult = await LoopsService.sendOtpEmail(email, plainOtp);
+    const loopsResult = await LoopsService.sendOtpEmail(email, plainOtp, OTP_EXPIRY_MINUTES);
 
     // The plain code is only ever printed locally — never into production logs
     if (env.NODE_ENV === "development") {

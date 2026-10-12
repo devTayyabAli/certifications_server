@@ -52,8 +52,8 @@ const envSchema = z.object({
   DENIED_LISTS: z.string().default("Si Her DeFi Denied"),
   // Loops.so Email Delivery Configuration
   LOOPS_API_KEY: z.string().default(""),
-  LOOPS_TRANSACTIONAL_ID: z.string().default(""),
-  LOOPS_EVENT_NAME: z.string().default("otp_verification"),
+  // "Si Her DeFi sign-in code" transactional email (sender: Si Her DeFi · dao@si3.space)
+  LOOPS_TRANSACTIONAL_ID: z.string().default("cmv57vpny06qi0j2ryafees9a"),
   // On-chain certificate. Minting stays switched off until a contract is set.
   CERTIFICATE_CONTRACT_ADDRESS: z.string().default(""),
   CERTIFICATE_CHAIN: z.enum(["base", "base-sepolia"]).default("base"),

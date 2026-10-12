@@ -24,12 +24,12 @@ export class LoopsService {
   }
 
   /**
-   * Send 6-digit OTP email using Loops.so.
-   * Supports:
-   * 1. Transactional Email Template (if LOOPS_TRANSACTIONAL_ID is set - Recommended)
-   * 2. Event-triggered Email (if LOOPS_EVENT_NAME is configured)
+   * Send the 6-digit sign-in code with the "Si Her DeFi sign-in code"
+   * transactional email in Loops (sender: Si Her DeFi · dao@si3.space).
+   * The template takes exactly two data variables, both required:
+   * `code` and `expiresInMinutes`.
    */
-  static async sendOtpEmail(email: string, otpCode: string): Promise<SendOtpResult> {
+  static async sendOtpEmail(email: string, otpCode: string, expiresInMinutes: number): Promise<SendOtpResult> {
     const loops = this.getClient();
 
     if (!loops) {
@@ -40,51 +40,27 @@ export class LoopsService {
       };
     }
 
+    // Only the Si Her DeFi template sends sign-in codes. There is deliberately no
+    // event-based fallback: it could trigger an older loop (e.g. the Kaia login email).
+    if (!env.LOOPS_TRANSACTIONAL_ID) {
+      return { success: false, error: "LOOPS_TRANSACTIONAL_ID is not configured" };
+    }
+
     try {
-      // 1. Preferred method: Transactional Email by ID
-      if (env.LOOPS_TRANSACTIONAL_ID) {
-        console.log(`📡 [LOOPS] Sending transactional OTP email to ${email} (Template: ${env.LOOPS_TRANSACTIONAL_ID})...`);
-        const res = await loops.sendTransactionalEmail({
-          transactionalId: env.LOOPS_TRANSACTIONAL_ID,
-          email,
-          dataVariables: {
-            code: otpCode,
-            otpCode: otpCode,
-            otp: otpCode,
-            expiresInMinutes: 10,
-          },
-        });
-
-        if (res.success) {
-          console.log(`✅ [LOOPS] Transactional OTP email successfully dispatched to ${email}!`);
-          return { success: true, message: "Transactional email sent" };
-        } else {
-          console.warn(`⚠️ [LOOPS] Transactional dispatch returned unsuccessful:`, res);
-          return { success: false, error: "Loops returned unsuccessful response" };
-        }
-      }
-
-      // 2. Fallback method: Send Event
-      const eventName = env.LOOPS_EVENT_NAME || "otp_verification";
-      console.log(`📡 [LOOPS] Sending event "${eventName}" to ${email} with OTP...`);
-      const eventRes = await loops.sendEvent({
+      const res = await loops.sendTransactionalEmail({
+        transactionalId: env.LOOPS_TRANSACTIONAL_ID,
         email,
-        eventName,
-        eventProperties: {
+        dataVariables: {
           code: otpCode,
-          otpCode: otpCode,
-          otp: otpCode,
-          expiresInMinutes: 10,
+          expiresInMinutes,
         },
       });
 
-      if (eventRes.success) {
-        console.log(`✅ [LOOPS] Event "${eventName}" dispatched to ${email}!`);
-        return { success: true, message: `Event ${eventName} dispatched` };
-      } else {
-        console.warn(`⚠️ [LOOPS] Event dispatch returned unsuccessful:`, eventRes);
-        return { success: false, error: "Loops event dispatch unsuccessful" };
+      if (res.success) {
+        return { success: true, message: "Transactional email sent" };
       }
+      console.warn(`⚠️ [LOOPS] Transactional dispatch returned unsuccessful:`, res);
+      return { success: false, error: "Loops returned unsuccessful response" };
     } catch (err: any) {
       console.error(`❌ [LOOPS] Error sending email to ${email}:`, err.message || err);
       return {
