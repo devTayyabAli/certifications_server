@@ -27,5 +27,5 @@ router.use("/certificate", certificateRoutes);
 router.use("/settings", settingsRoutes);
 router.use("/partners", partnerRoutes);
 
-export const v1Router = router;
+export const v1Router: Router = router;
 
