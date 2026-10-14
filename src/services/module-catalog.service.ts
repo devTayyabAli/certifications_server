@@ -190,7 +190,9 @@ export class ModuleCatalogService {
 
     const section = await CmsModuleSpeakersService.getAll();
     if (section && section.length > 0) {
-      const own = section.filter((s) => s.week === m.week || names.includes(normalize(s.name)));
+      // a speaker with a module (Week / sub-section) shows only on that module;
+      // name matching is just for speakers that don't say which module they're for
+      const own = section.filter((s) => (s.week !== null ? s.week === m.week : names.includes(normalize(s.name))));
       if (own.length > 0) return own;
     }
 
