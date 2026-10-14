@@ -51,7 +51,7 @@ async function main() {
       scheduledDate: m.startsAt ?? undefined,
       endDate: m.endsAt ?? undefined,
     });
-    const speakers = await ModuleCatalogService.speakersFor({ title: m.title, speakerNames: m.speakerNames });
+    const speakers = await ModuleCatalogService.speakersFor({ title: m.title, speakerNames: m.speakerNames, week: m.week });
     if (m.unlocksCertificate) certificateModules += 1;
 
     console.log(`\n${m.dateLabel} — ${m.title}  (/module/${m.slug})`);

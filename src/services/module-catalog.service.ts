@@ -2,6 +2,7 @@ import { createHash } from "crypto";
 import { IModule, Module } from "../models/module.model";
 import { Quiz } from "../models/quiz.model";
 import { CmsModule, CmsModulesService, CmsQuizQuestion } from "./cms-modules.service";
+import { CmsModuleSpeakersService } from "./cms-module-speakers.service";
 import { CmsSpeaker, CmsSpeakerService } from "./cms-speaker.service";
 
 /**
@@ -178,11 +179,21 @@ export class ModuleCatalogService {
   }
 
   /**
-   * Speakers for a module from the SI<3> Speakers table: the names listed on
-   * the module if any, otherwise cohort speakers whose Session Title matches.
+   * Speakers for a module. First the CMS "Speakers" section on the Si Her DeFi
+   * page: speakers whose Week is this module's, plus anyone named in the
+   * module's Speakers field, in the section's order. If nobody there belongs
+   * to this module, the SI<3> Speakers table: the names listed on the module,
+   * otherwise cohort speakers whose Session Title matches.
    */
-  static async speakersFor(m: Pick<IModule, "title" | "speakerNames">): Promise<CmsSpeaker[]> {
+  static async speakersFor(m: Pick<IModule, "title" | "speakerNames" | "week">): Promise<CmsSpeaker[]> {
     const names = (m.speakerNames ?? []).map(normalize).filter(Boolean);
+
+    const section = await CmsModuleSpeakersService.getAll();
+    if (section && section.length > 0) {
+      const own = section.filter((s) => s.week === m.week || names.includes(normalize(s.name)));
+      if (own.length > 0) return own;
+    }
+
     if (names.length > 0) {
       const all = await CmsSpeakerService.getAllSpeakers();
       return names
