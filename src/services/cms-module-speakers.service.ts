@@ -1,12 +1,17 @@
 import type { CmsSpeaker } from "./cms-speaker.service";
-import { CmsTableDef, cmsBoolean, readCmsTable } from "./cms-table.service";
+import { CmsRecord, CmsTableDef, cmsBoolean, readCmsTable, readPageSubsections } from "./cms-table.service";
 
 /**
  * Speakers for the module pages, managed on the "Si Her DeFi (Base)" page →
- * section "Speakers" → `speakers` list (one item per speaker, in the order the
- * cards should appear). A speaker belongs to a module by its `week`, or by
- * being named in that module's `speakers` field. Modules with nobody here
- * still fall back to the shared "SI<3> Speakers" table.
+ * section "Speakers". The clear way: one sub-section per module, named like
+ * "Week 1 · Si Her Collective Capital", holding that module's `speakers` list
+ * (1, 2, 3 or more, in the order the cards appear). A sub-section's speakers
+ * only ever show on its own module.
+ *
+ * A `speakers` list directly on the section also works: each speaker belongs
+ * to the module in its `week` field, or (with no week) to modules naming them
+ * in their own Speakers field. Modules with nobody here fall back to the
+ * shared "SI<3> Speakers" table.
  */
 export const MODULE_SPEAKERS: CmsTableDef = {
   slug: "si-her-defi-speakers",
@@ -54,6 +59,34 @@ function image(value: string | undefined): string | undefined {
   return v.startsWith("/") && !v.startsWith("//") ? v : undefined;
 }
 
+function weekOf(value: string | undefined): number | null {
+  const digits = (value ?? "").match(/\d+/)?.[0];
+  return digits ? Number(digits) : null;
+}
+
+/** One CMS speaker item → a speaker card for `week`; null when it has no name or is switched off. */
+function toSpeaker(r: CmsRecord, week: number | null): ModuleSpeaker | null {
+  const v = r.values;
+  if (!v.name?.trim() || !cmsBoolean(v.active, true)) return null;
+  const company = v.company?.trim() ?? "";
+  return {
+    id: r.rowId,
+    name: v.name.trim(),
+    week,
+    role: v.title?.trim() ?? "",
+    companyName: company,
+    companyTag: company,
+    headshotUrl: image(v.photo),
+    bio: v.bio?.trim() || undefined,
+    telegramHandle: v.telegram?.trim().replace(/^@/, "").replace(/^https?:\/\/t\.me\//i, "") || undefined,
+    links: {
+      linkedin: link(v.linkedin, "https://www.linkedin.com/in/"),
+      x: link(v.x, "https://x.com/"),
+      website: link(v.website),
+    },
+  };
+}
+
 const CACHE_TTL_MS = 60 * 1000;
 let cache: { expiresAt: number; value: ModuleSpeaker[] | null } | null = null;
 
@@ -63,32 +96,19 @@ export class CmsModuleSpeakersService {
     if (cache && cache.expiresAt > Date.now()) return cache.value;
     let value: ModuleSpeaker[] | null = null;
     try {
-      const rows = await readCmsTable(MODULE_SPEAKERS);
-      value = rows
-        ? rows
-            .filter((r) => r.values.name?.trim() && cmsBoolean(r.values.active, true))
-            .map((r) => {
-              const v = r.values;
-              const weekDigits = (v.week ?? "").match(/\d+/)?.[0];
-              const company = v.company?.trim() ?? "";
-              return {
-                id: r.rowId,
-                name: v.name.trim(),
-                week: weekDigits ? Number(weekDigits) : null,
-                role: v.title?.trim() ?? "",
-                companyName: company,
-                companyTag: company,
-                headshotUrl: image(v.photo),
-                bio: v.bio?.trim() || undefined,
-                telegramHandle: v.telegram?.trim().replace(/^@/, "").replace(/^https?:\/\/t\.me\//i, "") || undefined,
-                links: {
-                  linkedin: link(v.linkedin, "https://www.linkedin.com/in/"),
-                  x: link(v.x, "https://x.com/"),
-                  website: link(v.website),
-                },
-              };
-            })
-        : null;
+      const [rows, groups] = await Promise.all([readCmsTable(MODULE_SPEAKERS), readPageSubsections(MODULE_SPEAKERS)]);
+      // per-module sub-sections first: the module comes from the sub-section,
+      // whatever (if anything) each item's own Week says
+      const fromGroups = (groups ?? []).flatMap((g) => {
+        const week = weekOf(g.values.week) ?? weekOf(g.title.match(/\bweek\s*0*(\d+)/i)?.[1]);
+        if (week === null) {
+          console.warn(`⚠️ Speakers sub-section "${g.title}" skipped — name it "Week N · Module title".`);
+          return [];
+        }
+        return g.rows.map((r) => toSpeaker(r, week)).filter((s): s is ModuleSpeaker => s !== null);
+      });
+      const fromList = (rows ?? []).map((r) => toSpeaker(r, weekOf(r.values.week))).filter((s): s is ModuleSpeaker => s !== null);
+      value = rows === null && groups === null ? null : [...fromGroups, ...fromList];
     } catch (err) {
       console.warn("⚠️ Could not load speakers from SI3 CMS:", (err as Error).message);
       if (cache) return cache.value;
