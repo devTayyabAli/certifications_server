@@ -15,17 +15,19 @@ import { isAddress } from "ethers";
 import { ApiError } from "../../utils/api-error";
 import {
   CAPSTONE_TOKEN_ID,
+  MAX_MODULE_TOKEN_ID,
+  badgeErrorMessage,
+  buildVoucher,
   chain,
+  checkClaimTx,
+  claimsEnabled,
+  heldTokenIds,
   holdsCapstone,
-  mintErrorMessage,
-  mintingEnabled,
-  receipt,
-  sendMint,
 } from "../../utils/badges-contract";
 import { generateVerificationCode } from "../../utils/crypto";
 
-/** A pending mint older than this can be retried (the chain is re-read first, so nothing is awarded twice). */
-const STALE_MINT_MS = 10 * 60 * 1000;
+/** A claim still unconfirmed after this is treated as failed, so the learner can claim again. */
+const STALE_CLAIM_MS = 15 * 60 * 1000;
 
 function verifyUrl(code: string) {
   return `${env.FRONTEND_URL.replace(/\/+$/, "")}/credential/${encodeURIComponent(code)}`;
@@ -96,52 +98,54 @@ async function syncCertificate(userId: Types.ObjectId, progress: IUserProgress |
     cert.earnedBadgesCount = badgeCount;
     cert.totalBadgesCount = COHORT_BADGE_TOTAL;
   }
-  if (cert.status !== "minted" && cert.mint?.state === "pending") await settleMint(cert);
+  if (cert.mint?.state === "pending" && user.walletAddress) await settleClaim(cert, user.walletAddress);
   if (cert.isNew || cert.isModified()) await cert.save();
   return { cert, user };
 }
 
 /**
- * Checks an in-flight mint against the chain. The certificate only becomes
- * "minted" once the capstone transaction is confirmed (or, if nothing had to be
- * sent, once the chain shows the capstone in the learner's wallet).
+ * Checks the learner's claim transaction against the chain. It counts only if
+ * it's mined, succeeded, came from the learner's own wallet and went to the
+ * badges contract. The certificate becomes "minted" once that's confirmed and
+ * the wallet holds the capstone; a badges-only claim just clears.
  */
-async function settleMint(cert: ICertificate) {
+async function settleClaim(cert: ICertificate, wallet: string) {
   const m = cert.mint!;
+  if (!m.txHash) return;
   try {
-    // the capstone is the certificate; the badges tx (if any) must not have failed either
-    const hashes = [m.badgesTxHash, m.capstoneTxHash].filter((h): h is string => !!h);
-    const receipts = await Promise.all(hashes.map((h) => receipt(h)));
-    if (receipts.some((r) => r && r.status === 0)) {
-      cert.mint = { ...m, state: "failed", error: "The mint transaction failed on-chain. Please try again." };
+    const check = await checkClaimTx(m.txHash, wallet);
+    if (check.state === "pending") {
+      if (Date.now() - new Date(m.startedAt).getTime() > STALE_CLAIM_MS) {
+        cert.mint = { ...m, state: "failed", error: "The claim wasn't confirmed on-chain. Please try again." };
+      }
       return;
     }
-    if (receipts.some((r) => !r)) return; // still pending
-
-    const capstone = m.capstoneTxHash ? receipts[hashes.indexOf(m.capstoneTxHash)] : null;
-    if (!capstone && !(await holdsCapstone(cert.recipientAddress))) {
-      cert.mint = { ...m, state: "failed", error: "The certificate wasn't found on-chain. Please try again." };
+    if (check.state === "failed") {
+      cert.mint = { ...m, state: "failed", error: check.reason };
       return;
     }
-    const c = chain();
-    cert.status = "minted";
-    cert.tokenId = String(CAPSTONE_TOKEN_ID);
-    cert.txHash = m.capstoneTxHash ?? m.badgesTxHash ?? undefined;
-    cert.blockNumber = capstone?.blockNumber;
-    cert.mintedAt = new Date();
-    cert.chainId = c.chainId;
-    cert.network = c.name;
+    if (cert.status === "unlocked" && (await holdsCapstone(wallet))) {
+      const c = chain();
+      cert.status = "minted";
+      cert.tokenId = String(CAPSTONE_TOKEN_ID);
+      cert.txHash = m.txHash;
+      cert.blockNumber = check.receipt.blockNumber;
+      cert.mintedAt = new Date();
+      cert.chainId = c.chainId;
+      cert.network = c.name;
+      cert.recipientAddress = wallet;
+    }
     cert.mint = null;
   } catch (err) {
     // the RPC is unreachable: leave it pending and check again next time
-    console.warn("⚠️ Could not check the mint on-chain:", (err as Error).message);
+    console.warn("⚠️ Could not check the claim on-chain:", (err as Error).message);
   }
 }
 
 function onChain(cert: ICertificate) {
   const c = chain();
   return {
-    enabled: mintingEnabled(),
+    enabled: claimsEnabled(),
     network: cert.status === "minted" && cert.network ? cert.network : c.name,
     chainId: cert.status === "minted" && cert.chainId ? cert.chainId : c.chainId,
     // shown for a minted certificate even if minting is later switched off
@@ -177,6 +181,28 @@ export class CertificateService {
       .map((m) => ({ week: m.week, title: m.title, slug: m.slug }));
     const prerequisite = modules.find((m) => m.isPrerequisiteForCertificate);
 
+    // What's already in the learner's wallet, so the page knows what's left to claim
+    const wallet = isAddress(user.walletAddress ?? "") ? user.walletAddress! : null;
+    const earnedWeeks = badges
+      .map((b) => b.week)
+      .filter((w): w is number => w !== null && w >= 1 && w <= MAX_MODULE_TOKEN_ID);
+    let held: Set<number> | null = null;
+    if (claimsEnabled() && wallet) {
+      try {
+        held = await heldTokenIds(wallet, [...new Set([...earnedWeeks, CAPSTONE_TOKEN_ID])]);
+      } catch (err) {
+        console.warn("⚠️ Could not read the wallet's badges on-chain:", (err as Error).message);
+      }
+    }
+    const claimable = held
+      ? {
+          moduleIds: [...new Set(earnedWeeks)].filter((w) => !held!.has(w)).sort((a, b) => a - b),
+          capstone: cert.status === "unlocked" && !held.has(CAPSTONE_TOKEN_ID),
+        }
+      : null;
+    const claimPending =
+      cert.mint?.state === "pending" && Date.now() - new Date(cert.mint.startedAt).getTime() < STALE_CLAIM_MS;
+
     return {
       status: cert.status,
       recipientName: cert.recipientName,
@@ -190,20 +216,21 @@ export class CertificateService {
       totalBadges: COHORT_BADGE_TOTAL,
       stillOpen,
       onChain: onChain(cert),
+      // earned badges (and the certificate, once unlocked) not yet in the wallet; null if unknown
+      claimable,
+      // true when the learner can claim something now from their own wallet
       canMint:
-        mintingEnabled() &&
-        cert.status === "unlocked" &&
-        isAddress(user.walletAddress ?? "") &&
-        !(cert.mint?.state === "pending" && Date.now() - new Date(cert.mint.startedAt).getTime() < STALE_MINT_MS),
-      // an in-flight mint (poll until it's minted) or the reason the last one failed
+        claimsEnabled() &&
+        !!wallet &&
+        !claimPending &&
+        !!claimable &&
+        (claimable.moduleIds.length > 0 || claimable.capstone),
+      // the claim transaction while it confirms (poll until settled), or why the last one failed
       mint: {
-        pending: cert.mint?.state === "pending",
-        error: cert.mint?.state === "failed" ? cert.mint.error ?? "The mint didn't go through." : null,
-        txHash: cert.mint?.capstoneTxHash ?? cert.mint?.badgesTxHash ?? null,
-        explorerUrl:
-          cert.mint?.capstoneTxHash || cert.mint?.badgesTxHash
-            ? `${chain().explorer}/tx/${cert.mint?.capstoneTxHash ?? cert.mint?.badgesTxHash}`
-            : null,
+        pending: claimPending,
+        error: cert.mint?.state === "failed" ? cert.mint.error ?? "The claim didn't go through." : null,
+        txHash: cert.mint?.txHash ?? null,
+        explorerUrl: cert.mint?.txHash ? `${chain().explorer}/tx/${cert.mint.txHash}` : null,
       },
     };
   }
@@ -244,55 +271,49 @@ export class CertificateService {
   }
 
   /**
-   * Mints the learner's certificate on-chain from the server's minter wallet:
-   * the module badges they earned (token id = week) and the capstone (13). The
-   * transactions are sent and recorded as pending; the certificate becomes
-   * "minted" only once the chain confirms them (see settleMint), which the
-   * certificate page picks up by polling GET /certificate.
+   * A signed voucher the learner's wallet sends to `claim()` on the contract:
+   * every module badge they've earned that isn't in their wallet yet, plus the
+   * certificate once it's unlocked. The learner signs and pays the gas; the
+   * contract checks the voucher, so nothing unearned can be claimed.
    */
-  static async mint(userId: Types.ObjectId) {
-    if (!mintingEnabled()) {
-      throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, "On-chain minting isn't open yet.");
-    }
+  static async claimVoucher(userId: Types.ObjectId) {
+    if (!claimsEnabled()) throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, "Badge claiming isn't open yet.");
     const progress = await UserProgress.findOne({ user: userId });
     const { cert, user } = await syncCertificate(userId, progress);
-    if (cert.status === "minted") return this.getCertificate(userId);
-    if (cert.status !== "unlocked") throw ApiError.forbidden("Finish the cohort to unlock your certificate first.");
-    const learner = user.walletAddress ?? "";
-    if (!isAddress(learner)) throw ApiError.badRequest("Connect a wallet first, so the certificate has somewhere to go.");
-
-    // One mint at a time per learner; a pending one older than STALE_MINT_MS can be retried
-    const now = new Date();
-    const locked = await Certificate.findOneAndUpdate(
-      {
-        _id: cert._id,
-        status: "unlocked",
-        $or: [
-          { mint: null },
-          { "mint.state": "failed" },
-          { "mint.startedAt": { $lt: new Date(now.getTime() - STALE_MINT_MS) } },
-        ],
-      },
-      { $set: { mint: { state: "pending", startedAt: now, badgesTxHash: null, capstoneTxHash: null, error: null } } },
-      { new: true }
-    );
-    if (!locked) throw ApiError.conflict("Your certificate is already being minted.");
-
-    try {
-      const weeks = (await earnedBadges(progress)).map((b) => b.week).filter((w): w is number => w !== null);
-      const sent = await sendMint(learner, weeks);
-      await Certificate.updateOne(
-        { _id: cert._id },
-        { $set: { "mint.badgesTxHash": sent.badgesTxHash, "mint.capstoneTxHash": sent.capstoneTxHash } }
-      );
-    } catch (err) {
-      const message = mintErrorMessage(err);
-      console.error("❌ Certificate mint failed to send:", (err as Error).message);
-      await Certificate.updateOne({ _id: cert._id }, { $set: { "mint.state": "failed", "mint.error": message } });
-      throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, `${message} Please try again in a moment.`);
+    const wallet = user.walletAddress ?? "";
+    if (!isAddress(wallet)) throw ApiError.badRequest("Connect a wallet first, so your badges have somewhere to go.");
+    if (cert.mint?.state === "pending" && Date.now() - new Date(cert.mint.startedAt).getTime() < STALE_CLAIM_MS) {
+      throw ApiError.conflict("Your last claim is still confirming. Please wait a moment.");
     }
 
-    // settles straight away if nothing needed sending; otherwise returns it pending
+    const weeks = (await earnedBadges(progress)).map((b) => b.week).filter((w): w is number => w !== null);
+    let voucher;
+    try {
+      voucher = await buildVoucher(wallet, weeks, cert.status === "unlocked");
+    } catch (err) {
+      console.error("❌ Could not prepare a claim voucher:", (err as Error).message);
+      throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, `${badgeErrorMessage(err)} Please try again in a moment.`);
+    }
+    if (!voucher) throw ApiError.conflict("Everything you've earned is already in your wallet.");
+    return voucher;
+  }
+
+  /**
+   * Records the claim transaction the learner's wallet sent, then checks it on
+   * the chain (see settleClaim). The hash is only a pointer: it must turn out
+   * to be the learner's own successful transaction to this contract.
+   */
+  static async recordClaim(userId: Types.ObjectId, txHash: string) {
+    if (!claimsEnabled()) throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, "Badge claiming isn't open yet.");
+    const progress = await UserProgress.findOne({ user: userId });
+    const { cert, user } = await syncCertificate(userId, progress);
+    if (!isAddress(user.walletAddress ?? "")) throw ApiError.badRequest("Connect a wallet first.");
+
+    await Certificate.updateOne(
+      { _id: cert._id },
+      { $set: { mint: { state: "pending", startedAt: new Date(), txHash, error: null } } }
+    );
+    // settles right away if it's already mined; otherwise comes back pending
     return this.getCertificate(userId);
   }
 }

@@ -13,11 +13,17 @@ export class CertificateController {
     });
   });
 
-  /** Starts the on-chain mint; the certificate comes back pending until the chain confirms it. */
-  static mint = asyncHandler(async (req: Request, res: Response) => {
-    const data = await CertificateService.mint(req.user!._id);
+  /** A signed voucher for the learner's wallet to claim its earned badges on-chain. */
+  static claimVoucher = asyncHandler(async (req: Request, res: Response) => {
+    const data = await CertificateService.claimVoucher(req.user!._id);
+    return ApiResponse.success(res, { message: "Claim voucher ready", data });
+  });
+
+  /** The claim transaction the wallet sent; the certificate comes back pending until the chain confirms it. */
+  static recordClaim = asyncHandler(async (req: Request, res: Response) => {
+    const data = await CertificateService.recordClaim(req.user!._id, req.body.txHash);
     return ApiResponse.success(res, {
-      message: data.status === "minted" ? "Certificate minted" : "Minting your certificate",
+      message: data.status === "minted" ? "Certificate minted" : "Claim submitted",
       data,
     });
   });

@@ -1,9 +1,8 @@
 import { z } from "zod";
 
-export const recordMintSchema = z.object({
-  txHash: z.string().trim().regex(/^0x[a-fA-F0-9]{64}$/, "Must be a valid Ethereum / Base transaction hash (0x...)"),
-  tokenId: z.string().trim().min(1, "Token ID is required"),
-  blockNumber: z.number().int().positive().optional(),
+/** The claim transaction the learner's wallet sent; checked on-chain before it counts. */
+export const recordClaimSchema = z.object({
+  txHash: z.string().trim().regex(/^0x[a-fA-F0-9]{64}$/, "Must be a valid transaction hash (0x...)"),
 });
 
-export type RecordMintInput = z.infer<typeof recordMintSchema>;
+export type RecordClaimInput = z.infer<typeof recordClaimSchema>;
