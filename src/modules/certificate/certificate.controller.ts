@@ -13,21 +13,12 @@ export class CertificateController {
     });
   });
 
-  static prepareMint = asyncHandler(async (req: Request, res: Response) => {
-    const userId = req.user!._id;
-    const data = await CertificateService.prepareMint(userId);
+  /** Starts the on-chain mint; the certificate comes back pending until the chain confirms it. */
+  static mint = asyncHandler(async (req: Request, res: Response) => {
+    const data = await CertificateService.mint(req.user!._id);
     return ApiResponse.success(res, {
-      message: "Minting payload prepared",
+      message: data.status === "minted" ? "Certificate minted" : "Minting your certificate",
       data,
-    });
-  });
-
-  static recordMint = asyncHandler(async (req: Request, res: Response) => {
-    const userId = req.user!._id;
-    const result = await CertificateService.recordMint(userId, req.body);
-    return ApiResponse.success(res, {
-      message: "On-chain certificate minting recorded successfully",
-      data: result,
     });
   });
 

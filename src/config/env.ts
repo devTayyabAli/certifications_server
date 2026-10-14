@@ -54,9 +54,15 @@ const envSchema = z.object({
   LOOPS_API_KEY: z.string().default(""),
   // "Si Her DeFi sign-in code" transactional email (sender: Si Her DeFi · dao@si3.space)
   LOOPS_TRANSACTIONAL_ID: z.string().default("cmv57vpny06qi0j2ryafees9a"),
-  // On-chain certificate. Minting stays switched off until a contract is set.
+  // On-chain badges (LearningBadges, ERC-1155). Minting stays switched off until
+  // both the contract and the minter key are set.
   CERTIFICATE_CONTRACT_ADDRESS: z.string().default(""),
-  CERTIFICATE_CHAIN: z.enum(["base", "base-sepolia"]).default("base"),
+  CERTIFICATE_CHAIN: z.enum(["base", "base-sepolia", "sepolia"]).default("base"),
+  // Optional: an RPC for that chain; a public one is used when empty
+  CERTIFICATE_RPC_URL: z.string().default(""),
+  // Private key of the wallet that holds MINTER_ROLE on the contract (pays the
+  // gas). Secret: set only in the server's environment, never in code or chat.
+  MINTER_PRIVATE_KEY: z.string().default(""),
   // Development only — see applyDevOverrides in cms-modules.service.ts
   DEV_SESSION_OVERRIDES: z.string().default(""),
 });

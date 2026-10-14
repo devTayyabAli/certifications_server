@@ -17,6 +17,14 @@ export interface ICertificate extends Document {
   txHash?: string;
   blockNumber?: number;
   mintedAt?: Date;
+  /** The on-chain mint while it's in flight or after it failed; cleared once minted */
+  mint?: {
+    state: "pending" | "failed";
+    startedAt: Date;
+    badgesTxHash?: string | null;
+    capstoneTxHash?: string | null;
+    error?: string | null;
+  } | null;
   metadataUri?: string;
   earnedBadgesCount: number;
   totalBadgesCount: number;
@@ -85,6 +93,19 @@ const certificateSchema = new Schema<ICertificate>(
     },
     mintedAt: {
       type: Date,
+    },
+    mint: {
+      type: new Schema(
+        {
+          state: { type: String, enum: ["pending", "failed"], required: true },
+          startedAt: { type: Date, required: true },
+          badgesTxHash: { type: String, default: null },
+          capstoneTxHash: { type: String, default: null },
+          error: { type: String, default: null },
+        },
+        { _id: false }
+      ),
+      default: null,
     },
     metadataUri: {
       type: String,

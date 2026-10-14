@@ -1,9 +1,7 @@
 import { Router } from "express";
 import { authenticateJwt } from "../../middlewares/auth.middleware";
 import { publicLookupRateLimiter } from "../../middlewares/rate-limiter.middleware";
-import { validateRequest } from "../../middlewares/validate.middleware";
 import { CertificateController } from "./certificate.controller";
-import { recordMintSchema } from "./certificate.validation";
 
 const router: Router = Router();
 
@@ -13,7 +11,7 @@ router.get("/verify/:identifier", publicLookupRateLimiter, CertificateController
 // Protected routes
 router.use(authenticateJwt);
 router.get("/", CertificateController.getCertificate);
-router.post("/prepare-mint", CertificateController.prepareMint);
-router.post("/record-mint", validateRequest({ body: recordMintSchema }), CertificateController.recordMint);
+// The server's minter wallet mints; nothing from the client (no hashes) is trusted
+router.post("/mint", CertificateController.mint);
 
 export const certificateRoutes = router;

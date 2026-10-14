@@ -11,23 +11,21 @@ import { Settings } from "../../models/settings.model";
 import { User } from "../../models/user.model";
 import { CmsCertificateService } from "../../services/cms-certificate.service";
 import { ModuleCatalogService, isQuizOpen, sessionState } from "../../services/module-catalog.service";
+import { isAddress } from "ethers";
 import { ApiError } from "../../utils/api-error";
+import {
+  CAPSTONE_TOKEN_ID,
+  chain,
+  holdsCapstone,
+  mintErrorMessage,
+  mintingEnabled,
+  receipt,
+  sendMint,
+} from "../../utils/badges-contract";
 import { generateVerificationCode } from "../../utils/crypto";
-import { RecordMintInput } from "./certificate.validation";
 
-const CHAINS = {
-  base: { name: "Base", chainId: 8453, explorer: "https://basescan.org" },
-  "base-sepolia": { name: "Base Sepolia", chainId: 84532, explorer: "https://sepolia.basescan.org" },
-} as const;
-
-function chain() {
-  return CHAINS[env.CERTIFICATE_CHAIN];
-}
-
-/** Minting is only possible once the certificate contract is configured. */
-function mintingEnabled() {
-  return /^0x[a-fA-F0-9]{40}$/.test(env.CERTIFICATE_CONTRACT_ADDRESS);
-}
+/** A pending mint older than this can be retried (the chain is re-read first, so nothing is awarded twice). */
+const STALE_MINT_MS = 10 * 60 * 1000;
 
 function verifyUrl(code: string) {
   return `${env.FRONTEND_URL.replace(/\/+$/, "")}/credential/${encodeURIComponent(code)}`;
@@ -98,17 +96,56 @@ async function syncCertificate(userId: Types.ObjectId, progress: IUserProgress |
     cert.earnedBadgesCount = badgeCount;
     cert.totalBadgesCount = COHORT_BADGE_TOTAL;
   }
+  if (cert.status !== "minted" && cert.mint?.state === "pending") await settleMint(cert);
   if (cert.isNew || cert.isModified()) await cert.save();
   return { cert, user };
+}
+
+/**
+ * Checks an in-flight mint against the chain. The certificate only becomes
+ * "minted" once the capstone transaction is confirmed (or, if nothing had to be
+ * sent, once the chain shows the capstone in the learner's wallet).
+ */
+async function settleMint(cert: ICertificate) {
+  const m = cert.mint!;
+  try {
+    // the capstone is the certificate; the badges tx (if any) must not have failed either
+    const hashes = [m.badgesTxHash, m.capstoneTxHash].filter((h): h is string => !!h);
+    const receipts = await Promise.all(hashes.map((h) => receipt(h)));
+    if (receipts.some((r) => r && r.status === 0)) {
+      cert.mint = { ...m, state: "failed", error: "The mint transaction failed on-chain. Please try again." };
+      return;
+    }
+    if (receipts.some((r) => !r)) return; // still pending
+
+    const capstone = m.capstoneTxHash ? receipts[hashes.indexOf(m.capstoneTxHash)] : null;
+    if (!capstone && !(await holdsCapstone(cert.recipientAddress))) {
+      cert.mint = { ...m, state: "failed", error: "The certificate wasn't found on-chain. Please try again." };
+      return;
+    }
+    const c = chain();
+    cert.status = "minted";
+    cert.tokenId = String(CAPSTONE_TOKEN_ID);
+    cert.txHash = m.capstoneTxHash ?? m.badgesTxHash ?? undefined;
+    cert.blockNumber = capstone?.blockNumber;
+    cert.mintedAt = new Date();
+    cert.chainId = c.chainId;
+    cert.network = c.name;
+    cert.mint = null;
+  } catch (err) {
+    // the RPC is unreachable: leave it pending and check again next time
+    console.warn("⚠️ Could not check the mint on-chain:", (err as Error).message);
+  }
 }
 
 function onChain(cert: ICertificate) {
   const c = chain();
   return {
     enabled: mintingEnabled(),
-    network: c.name,
-    chainId: c.chainId,
-    contractAddress: mintingEnabled() ? env.CERTIFICATE_CONTRACT_ADDRESS : null,
+    network: cert.status === "minted" && cert.network ? cert.network : c.name,
+    chainId: cert.status === "minted" && cert.chainId ? cert.chainId : c.chainId,
+    // shown for a minted certificate even if minting is later switched off
+    contractAddress: isAddress(env.CERTIFICATE_CONTRACT_ADDRESS) ? env.CERTIFICATE_CONTRACT_ADDRESS : null,
     tokenId: cert.tokenId ?? null,
     txHash: cert.txHash ?? null,
     mintedAt: cert.mintedAt ?? null,
@@ -153,7 +190,21 @@ export class CertificateService {
       totalBadges: COHORT_BADGE_TOTAL,
       stillOpen,
       onChain: onChain(cert),
-      canMint: mintingEnabled() && cert.status === "unlocked" && !!user.walletAddress,
+      canMint:
+        mintingEnabled() &&
+        cert.status === "unlocked" &&
+        isAddress(user.walletAddress ?? "") &&
+        !(cert.mint?.state === "pending" && Date.now() - new Date(cert.mint.startedAt).getTime() < STALE_MINT_MS),
+      // an in-flight mint (poll until it's minted) or the reason the last one failed
+      mint: {
+        pending: cert.mint?.state === "pending",
+        error: cert.mint?.state === "failed" ? cert.mint.error ?? "The mint didn't go through." : null,
+        txHash: cert.mint?.capstoneTxHash ?? cert.mint?.badgesTxHash ?? null,
+        explorerUrl:
+          cert.mint?.capstoneTxHash || cert.mint?.badgesTxHash
+            ? `${chain().explorer}/tx/${cert.mint?.capstoneTxHash ?? cert.mint?.badgesTxHash}`
+            : null,
+      },
     };
   }
 
@@ -188,18 +239,60 @@ export class CertificateService {
       content,
       badges: badges.map(({ name, image, week, moduleTitle }) => ({ name, image, week, moduleTitle })),
       totalBadges: COHORT_BADGE_TOTAL,
-      onChain: { ...onChain(cert), contractAddress: mintingEnabled() ? env.CERTIFICATE_CONTRACT_ADDRESS : null },
+      onChain: onChain(cert),
     };
   }
 
-  static async prepareMint(_userId: Types.ObjectId) {
-    // Until the certificate contract exists there is nothing honest to mint
-    throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, "On-chain minting isn't open yet.");
-  }
+  /**
+   * Mints the learner's certificate on-chain from the server's minter wallet:
+   * the module badges they earned (token id = week) and the capstone (13). The
+   * transactions are sent and recorded as pending; the certificate becomes
+   * "minted" only once the chain confirms them (see settleMint), which the
+   * certificate page picks up by polling GET /certificate.
+   */
+  static async mint(userId: Types.ObjectId) {
+    if (!mintingEnabled()) {
+      throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, "On-chain minting isn't open yet.");
+    }
+    const progress = await UserProgress.findOne({ user: userId });
+    const { cert, user } = await syncCertificate(userId, progress);
+    if (cert.status === "minted") return this.getCertificate(userId);
+    if (cert.status !== "unlocked") throw ApiError.forbidden("Finish the cohort to unlock your certificate first.");
+    const learner = user.walletAddress ?? "";
+    if (!isAddress(learner)) throw ApiError.badRequest("Connect a wallet first, so the certificate has somewhere to go.");
 
-  static async recordMint(_userId: Types.ObjectId, _data: RecordMintInput) {
-    // Will verify the transaction on-chain once the contract is live; never
-    // trust a client-supplied hash on its own
-    throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, "On-chain minting isn't open yet.");
+    // One mint at a time per learner; a pending one older than STALE_MINT_MS can be retried
+    const now = new Date();
+    const locked = await Certificate.findOneAndUpdate(
+      {
+        _id: cert._id,
+        status: "unlocked",
+        $or: [
+          { mint: null },
+          { "mint.state": "failed" },
+          { "mint.startedAt": { $lt: new Date(now.getTime() - STALE_MINT_MS) } },
+        ],
+      },
+      { $set: { mint: { state: "pending", startedAt: now, badgesTxHash: null, capstoneTxHash: null, error: null } } },
+      { new: true }
+    );
+    if (!locked) throw ApiError.conflict("Your certificate is already being minted.");
+
+    try {
+      const weeks = (await earnedBadges(progress)).map((b) => b.week).filter((w): w is number => w !== null);
+      const sent = await sendMint(learner, weeks);
+      await Certificate.updateOne(
+        { _id: cert._id },
+        { $set: { "mint.badgesTxHash": sent.badgesTxHash, "mint.capstoneTxHash": sent.capstoneTxHash } }
+      );
+    } catch (err) {
+      const message = mintErrorMessage(err);
+      console.error("❌ Certificate mint failed to send:", (err as Error).message);
+      await Certificate.updateOne({ _id: cert._id }, { $set: { "mint.state": "failed", "mint.error": message } });
+      throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, `${message} Please try again in a moment.`);
+    }
+
+    // settles straight away if nothing needed sending; otherwise returns it pending
+    return this.getCertificate(userId);
   }
 }
