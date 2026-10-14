@@ -129,17 +129,23 @@ export function generateGoogleCalendarUrl(event: CalendarEventPayload): string {
   const endStr = formatCalendarUtcDate(end);
 
   const sanitizedUrl = sanitizeCalendarUrl(event.url);
+  const isRoam = sanitizedUrl?.includes("ro.am");
+  const joinLabel = isRoam ? "Join Roam Session" : "Join Session";
   const fullDescription = [
     event.description || "Si Her DeFi Cohort Learning Session",
-    sanitizedUrl ? `\n\nJoin Session: ${sanitizedUrl}` : "",
+    sanitizedUrl ? `\n\n${joinLabel}: ${sanitizedUrl}` : "",
   ].filter(Boolean).join("");
+
+  const locationStr = sanitizedUrl
+    ? `${event.location || "Si Her DeFi Virtual Stage"} (${sanitizedUrl})`
+    : event.location || "Si Her DeFi Virtual Stage";
 
   const params = new URLSearchParams({
     action: "TEMPLATE",
     text: event.title,
     dates: `${startStr}/${endStr}`,
     details: fullDescription,
-    location: event.location || "Si Her DeFi Virtual Stage",
+    location: locationStr,
   });
 
   if (event.timezone && event.timezone !== "UTC") {
@@ -157,10 +163,16 @@ export function generateOutlookCalendarUrl(event: CalendarEventPayload): string 
   const end = event.endDate ? parseValidDate(event.endDate) : new Date(start.getTime() + 60 * 60 * 1000);
 
   const sanitizedUrl = sanitizeCalendarUrl(event.url);
+  const isRoam = sanitizedUrl?.includes("ro.am");
+  const joinLabel = isRoam ? "Join Roam Session" : "Join Session";
   const fullDescription = [
     event.description || "Si Her DeFi Cohort Learning Session",
-    sanitizedUrl ? `\n\nJoin Session: ${sanitizedUrl}` : "",
+    sanitizedUrl ? `\n\n${joinLabel}: ${sanitizedUrl}` : "",
   ].filter(Boolean).join("");
+
+  const locationStr = sanitizedUrl
+    ? `${event.location || "Si Her DeFi Virtual Stage"} (${sanitizedUrl})`
+    : event.location || "Si Her DeFi Virtual Stage";
 
   const params = new URLSearchParams({
     path: "/calendar/action/compose",
@@ -169,7 +181,7 @@ export function generateOutlookCalendarUrl(event: CalendarEventPayload): string 
     startdt: start.toISOString(),
     enddt: end.toISOString(),
     body: fullDescription,
-    location: event.location || "Si Her DeFi Virtual Stage",
+    location: locationStr,
   });
 
   return `https://outlook.live.com/calendar/0/deeplink/compose?${params.toString()}`;
@@ -183,10 +195,16 @@ export function generateOffice365CalendarUrl(event: CalendarEventPayload): strin
   const end = event.endDate ? parseValidDate(event.endDate) : new Date(start.getTime() + 60 * 60 * 1000);
 
   const sanitizedUrl = sanitizeCalendarUrl(event.url);
+  const isRoam = sanitizedUrl?.includes("ro.am");
+  const joinLabel = isRoam ? "Join Roam Session" : "Join Session";
   const fullDescription = [
     event.description || "Si Her DeFi Cohort Learning Session",
-    sanitizedUrl ? `\n\nJoin Session: ${sanitizedUrl}` : "",
+    sanitizedUrl ? `\n\n${joinLabel}: ${sanitizedUrl}` : "",
   ].filter(Boolean).join("");
+
+  const locationStr = sanitizedUrl
+    ? `${event.location || "Si Her DeFi Virtual Stage"} (${sanitizedUrl})`
+    : event.location || "Si Her DeFi Virtual Stage";
 
   const params = new URLSearchParams({
     path: "/calendar/action/compose",
@@ -195,7 +213,7 @@ export function generateOffice365CalendarUrl(event: CalendarEventPayload): strin
     startdt: start.toISOString(),
     enddt: end.toISOString(),
     body: fullDescription,
-    location: event.location || "Si Her DeFi Virtual Stage",
+    location: locationStr,
   });
 
   return `https://outlook.office.com/calendar/0/deeplink/compose?${params.toString()}`;
@@ -215,11 +233,17 @@ export function generateIcsContent(event: CalendarEventPayload): string {
   const timezone = event.timezone || "UTC";
 
   const sanitizedUrl = sanitizeCalendarUrl(event.url);
+  const isRoam = sanitizedUrl?.includes("ro.am");
+  const joinLabel = isRoam ? "Roam Session Link" : "Session Meeting Link";
   const summary = escapeIcsText(event.title);
   const descWithUrl = (event.description || "Si Her DeFi Cohort Learning Session") +
-    (sanitizedUrl ? `\n\nSession Meeting Link: ${sanitizedUrl}` : "");
+    (sanitizedUrl ? `\n\n${joinLabel}: ${sanitizedUrl}` : "");
   const description = escapeIcsText(descWithUrl);
-  const location = escapeIcsText(event.location || "Si Her DeFi Virtual Stage");
+  const location = escapeIcsText(
+    sanitizedUrl
+      ? `${event.location || "Si Her DeFi Virtual Stage"} (${sanitizedUrl})`
+      : event.location || "Si Her DeFi Virtual Stage"
+  );
 
   const lines = [
     "BEGIN:VCALENDAR",

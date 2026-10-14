@@ -24,16 +24,9 @@ export const part1SubmitSchema = z.object({
   videoWatched: z.boolean().optional(),
 });
 
+/** Part 2 answers keyed by question id ("part2-q-1"…). No per-answer character limit, just a sane cap. */
 export const part2SurveySchema = z.object({
-  answers: z
-    .array(
-      z.object({
-        questionIndex: z.number().int().min(1),
-        questionText: z.string().min(1),
-        answerText: z.string().max(1000).default(""),
-      })
-    )
-    .min(1),
+  answers: z.record(z.string().max(64), z.string().max(10000)),
 });
 
 export type Part1DraftInput = z.infer<typeof part1DraftSchema>;

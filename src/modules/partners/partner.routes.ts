@@ -4,6 +4,7 @@ import { PartnerController } from "./partner.controller";
 const router: Router = Router();
 
 router.get("/", PartnerController.getPartners);
+router.get("/copy", PartnerController.getPartnersCopy);
 router.get("/more-ways", PartnerController.getMoreWays);
 
 export const partnerRoutes = router;

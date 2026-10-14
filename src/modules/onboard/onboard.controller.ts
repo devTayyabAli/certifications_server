@@ -40,6 +40,11 @@ export class OnboardController {
     });
   });
 
+  static getPart2 = asyncHandler(async (req: Request, res: Response) => {
+    const data = await OnboardService.getPart2(req.user!._id);
+    return ApiResponse.success(res, { message: "Si Her Onboard - Part 2", data });
+  });
+
   static submitPart2 = asyncHandler(async (req: Request, res: Response) => {
     const userId = req.user!._id;
     const result = await OnboardService.submitPart2(userId, req.body);

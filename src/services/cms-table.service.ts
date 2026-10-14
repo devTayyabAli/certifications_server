@@ -144,13 +144,56 @@ interface PageNode {
   label?: string;
   fields?: { name?: string; label?: string; type?: string }[];
   data?: Record<string, unknown>;
+  /** sub-sections, each its own node */
+  children?: PageNode[];
+}
+
+/** A sub-section of a page section: its title, its own simple fields, and the rows of its list. */
+export interface CmsSubsection {
+  title: string;
+  values: Record<string, string>;
+  rows: CmsRecord[];
 }
 
 /**
- * Reads the definition's content from the Si Her DeFi page. Returns `null`
- * when the page or section isn't set up, so the caller can fall back.
+ * The sub-sections inside the definition's section on the Si Her DeFi page
+ * (nested ones included), each with the rows of its first list, mapped onto
+ * the definition's fields. `null` when the page or section isn't set up.
  */
-async function readPageRecords(def: CmsTableDef): Promise<CmsRecord[] | null> {
+export async function readPageSubsections(def: CmsTableDef): Promise<CmsSubsection[] | null> {
+  const found = await pageSections(def);
+  if (!found) return null;
+  const section = found.sections.find(found.isNamed);
+  if (!section) return null;
+
+  const out: CmsSubsection[] = [];
+  const walk = (nodes: PageNode[] | undefined, path: string) => {
+    for (const [i, node] of (nodes ?? []).entries()) {
+      const title = String(node.label || node.name || "").trim();
+      const list = (node.fields ?? []).find((f) => f.type === "array" && f.name);
+      const data = node.data ?? {};
+      const own = Object.fromEntries(Object.entries(data).filter(([, v]) => !Array.isArray(v)));
+      const items = list?.name ? data[list.name] : undefined;
+      if (Array.isArray(items)) {
+        const key = `${path}-${normalizeName(title) || i + 1}`;
+        out.push({
+          title,
+          values: mapByName(own, def),
+          rows: items.map((item, index) => ({
+            rowId: `${key}-${index + 1}`,
+            values: mapByName((item ?? {}) as Record<string, unknown>, def),
+          })),
+        });
+      }
+      walk(node.children, `${path}-${i + 1}`);
+    }
+  };
+  walk((section.data?.tree as PageNode | undefined)?.children, normalizeName(def.page!.section));
+  return out;
+}
+
+/** The Si Her DeFi page's published sections (the definition's own section first), or `null` if the page isn't set up. */
+async function pageSections(def: CmsTableDef) {
   if (!def.page) return null;
   const db = cmsDb();
   const projectId = await cohortProjectId();
@@ -175,6 +218,18 @@ async function readPageRecords(def: CmsTableDef): Promise<CmsRecord[] | null> {
     .filter((d) => d.published !== false)
     // The named section first, then the rest of the page
     .sort((a, b) => Number(isNamed(b)) - Number(isNamed(a)));
+  return { sections, isNamed, wanted };
+}
+
+/**
+ * Reads the definition's content from the Si Her DeFi page. Returns `null`
+ * when the page or section isn't set up, so the caller can fall back.
+ */
+async function readPageRecords(def: CmsTableDef): Promise<CmsRecord[] | null> {
+  if (!def.page) return null;
+  const found = await pageSections(def);
+  if (!found) return null;
+  const { sections, isNamed, wanted } = found;
 
   if (!def.page.list) {
     const section = sections.find(isNamed);

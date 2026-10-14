@@ -1,5 +1,5 @@
 import { env } from "../config/env";
-import { CmsTableDef, cmsBoolean, cmsNumber, readCmsTable } from "./cms-table.service";
+import { CmsTableDef, cmsBoolean, cmsNumber, readCmsTable, readPageSubsections } from "./cms-table.service";
 
 /**
  * Cohort modules and their quizzes, managed by the Si Her team in the SI3 CMS
@@ -62,7 +62,27 @@ export const MODULES_TABLE: CmsTableDef = {
     { key: "chapters", columnId: "col-mod-chapters", name: "Chapters", type: "text" },
     { key: "speakers", columnId: "col-mod-speakers", name: "Speakers", type: "string" },
     { key: "partner", columnId: "col-mod-partner", name: "Partner", type: "string" },
-    { key: "liveLink", columnId: "col-mod-live", name: "Live Session Link", type: "url", aliases: ["Meeting Link"] },
+    {
+      key: "liveLink",
+      columnId: "col-mod-live",
+      name: "Live Session Link",
+      type: "url",
+      aliases: [
+        "Meeting Link",
+        "Roam Link",
+        "Ro.am Link",
+        "Roam Session Link",
+        "Roam URL",
+        "Session Link",
+        "Live Link",
+        "Virtual Stage Link",
+        "Live URL",
+        "Roam",
+        "live_link",
+        "meeting_link",
+        "roam_link",
+      ],
+    },
     { key: "badgeName", columnId: "col-mod-badge", name: "Badge Name", type: "string" },
     { key: "badgeImage", columnId: "col-mod-badge-img", name: "Badge Image", type: "image" },
     { key: "unlocksCertificate", columnId: "col-mod-cert", name: "Unlocks Certificate", type: "string", defaultValue: "false" },
@@ -163,8 +183,10 @@ const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "
 
 function safeUrl(value: string | undefined, { allowRelative = false } = {}): string | null {
   if (!value) return null;
-  if (/^https?:\/\//i.test(value)) return value;
-  if (allowRelative && value.startsWith("/") && !value.startsWith("//")) return value;
+  let trimmed = value.trim();
+  if (/^ro\.am\b/i.test(trimmed)) trimmed = `https://${trimmed}`;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  if (allowRelative && trimmed.startsWith("/") && !trimmed.startsWith("//")) return trimmed;
   return null;
 }
 
@@ -329,9 +351,10 @@ const CACHE_TTL_MS = 60 * 1000;
 let cache: { expiresAt: number; value: CmsModuleCatalog | null } | null = null;
 
 async function load(): Promise<CmsModuleCatalog | null> {
-  const [moduleRows, questionRows] = await Promise.all([
+  const [moduleRows, questionRows, questionGroups] = await Promise.all([
     readCmsTable(MODULES_TABLE),
     readCmsTable(QUIZ_QUESTIONS_TABLE),
+    readPageSubsections(QUIZ_QUESTIONS_TABLE),
   ]);
   if (!moduleRows) return null;
 
@@ -399,42 +422,82 @@ async function load(): Promise<CmsModuleCatalog | null> {
     });
   }
 
-  const questionsByWeek = new Map<number, CmsQuizQuestion[]>();
-  for (const row of questionRows ?? []) {
-    const v = row.values;
-    if (!cmsBoolean(v.active, true)) continue;
-    if (!v.question && !v.week) continue;
-    const week = parseWeek(v.week);
+  /** One CMS question → a quiz question for `week`, or null (with a warning) when it's incomplete. */
+  const toQuestion = (v: Record<string, string>, week: number, order: number): CmsQuizQuestion | null => {
     const correct = (v.correct ?? "").trim().toUpperCase().charAt(0) as OptionKey;
     const options = (["A", "B", "C", "D"] as OptionKey[])
       .map((key) => ({ key, text: (v[`option${key}`] ?? "").trim() }))
       .filter((o) => o.text);
-
-    if (!Number.isInteger(week) || !v.question) {
-      warnings.push(`Quiz row skipped — needs a Week and a Question.`);
-      continue;
-    }
     if (options.length < 2 || !options.some((o) => o.key === correct)) {
       warnings.push(
         `Week ${week} question "${v.question.slice(0, 40)}…" skipped — needs at least Option A and B, and a Correct Option (A–D) that has text.`
       );
-      continue;
+      return null;
     }
-
-    const list = questionsByWeek.get(week) ?? [];
-    list.push({
+    return {
       week,
-      order: cmsNumber(v.order, list.length + 1),
+      order,
       question: v.question,
       options,
       correct,
       explanation: v.explanation ?? "",
       hintTimestamp: /^\d{1,2}:\d{2}(:\d{2})?$/.test(v.hintTimestamp ?? "") ? v.hintTimestamp! : null,
       hintTitle: v.hintTitle ?? "",
-    });
+    };
+  };
+
+  const questionsByWeek = new Map<number, CmsQuizQuestion[]>();
+
+  // 1. One sub-section per module inside "quiz_questions" (e.g. "Week 1 · Si Her
+  //    Collective Capital") with that module's questions in order. The module is
+  //    found from a Week field on the sub-section, "Week N" in its name, or its
+  //    name matching the module title.
+  const weekFromGroup = (title: string, values: Record<string, string>) => {
+    const fromField = parseWeek(values.week);
+    if (Number.isInteger(fromField)) return fromField;
+    const fromName = title.match(/\bweek\s*0*(\d+)/i)?.[1];
+    if (fromName) return Number(fromName);
+    const plain = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const byTitle = modules.find((m) => plain(title).includes(plain(m.title)) && plain(m.title).length > 0);
+    return byTitle ? byTitle.week : NaN;
+  };
+  const groupedWeeks = new Set<number>();
+  for (const group of questionGroups ?? []) {
+    const week = weekFromGroup(group.title, group.values);
+    if (!Number.isInteger(week)) {
+      warnings.push(`Quiz sub-section "${group.title}" skipped — name it "Week N · Module title" (or match a module title).`);
+      continue;
+    }
+    const list = questionsByWeek.get(week) ?? [];
+    for (const row of group.rows) {
+      const v = row.values;
+      if (!v.question || !cmsBoolean(v.active, true)) continue;
+      const q = toQuestion(v, week, list.length + 1); // order = position in the list
+      if (q) list.push(q);
+    }
     questionsByWeek.set(week, list);
+    groupedWeeks.add(week);
   }
-  for (const list of questionsByWeek.values()) list.sort((a, b) => a.order - b.order);
+
+  // 2. The older flat list (one row per question with a Week) — still read for
+  //    any module that doesn't have its own sub-section yet
+  const flat = new Map<number, CmsQuizQuestion[]>();
+  for (const row of questionRows ?? []) {
+    const v = row.values;
+    if (!cmsBoolean(v.active, true)) continue;
+    if (!v.question && !v.week) continue;
+    const week = parseWeek(v.week);
+    if (!Number.isInteger(week) || !v.question) {
+      warnings.push(`Quiz row skipped — needs a Week and a Question.`);
+      continue;
+    }
+    if (groupedWeeks.has(week)) continue; // that module's sub-section wins
+    const list = flat.get(week) ?? [];
+    const q = toQuestion(v, week, cmsNumber(v.order, list.length + 1));
+    if (q) list.push(q);
+    flat.set(week, list);
+  }
+  for (const [week, list] of flat) questionsByWeek.set(week, list.sort((a, b) => a.order - b.order));
 
   modules.sort((a, b) => a.week - b.week);
   applyDevOverrides(modules);

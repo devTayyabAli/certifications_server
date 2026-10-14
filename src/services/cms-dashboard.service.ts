@@ -2,9 +2,30 @@ import { CmsTableDef, cmsBoolean, cmsNumber, readCmsTable } from "./cms-table.se
 
 /**
  * Dashboard content managed in the CMS on the Si Her DeFi (Base) page:
- *  - section "Partners"  → list "partners" (one item per partner card)
+ *  - section "Partners"  → heading / subheading / referral note, and list "partners" (one item per partner card)
  *  - section "More Ways" → heading / subheading, and list "cards"
  */
+
+/** The copy around the partner cards ("From our partners", its subtitle and the referral note). */
+export const PARTNERS_SECTION: CmsTableDef = {
+  slug: "si-her-defi-partners-section",
+  name: "Si Her DeFi Partners Section",
+  description: "Heading and notes around the partner cards on the learner dashboard.",
+  page: { section: "Partners" },
+  fields: [
+    { key: "heading", columnId: "col-ps-heading", name: "Heading", type: "string", aliases: ["Title"] },
+    { key: "subheading", columnId: "col-ps-sub", name: "Subheading", type: "string", aliases: ["Subtitle"] },
+    { key: "referralNote", columnId: "col-ps-referral", name: "Referral Note", type: "text", aliases: ["Disclaimer", "Footer Note"] },
+  ],
+};
+
+export const PARTNERS_COPY_DEFAULTS = {
+  heading: "From our partners",
+  // no subtitle unless the team writes one in the CMS (the design dropped it)
+  subheading: "",
+  referralNote: "Si Her DAO may earn a referral fee from links marked “Referral link”.",
+};
+export type PartnersCopy = typeof PARTNERS_COPY_DEFAULTS;
 
 export const PARTNERS_LIST: CmsTableDef = {
   slug: "si-her-defi-partners",
@@ -87,6 +108,7 @@ function safeImage(value: string | undefined): string | null {
 const CACHE_TTL_MS = 60 * 1000;
 let partnersCache: { expiresAt: number; value: CmsPartner[] | null } | null = null;
 let moreWaysCache: { expiresAt: number; value: MoreWays | null } | null = null;
+let partnersCopyCache: { expiresAt: number; value: PartnersCopy } | null = null;
 
 export class CmsDashboardService {
   /** Partner cards from the CMS, or `null` when the Partners section isn't set up. */
@@ -95,12 +117,14 @@ export class CmsDashboardService {
     let value: CmsPartner[] | null = null;
     try {
       const rows = await readCmsTable(PARTNERS_LIST);
+      // Cards show in the order they're arranged in the CMS list (drag to reorder);
+      // the old "order" number field is no longer used
       value = rows
         ? rows
             .filter((r) => r.values.title && cmsBoolean(r.values.active, true))
             .map((r, i) => ({
               id: r.rowId,
-              order: cmsNumber(r.values.order, i + 1),
+              order: i + 1,
               title: r.values.title,
               tag: r.values.tag ?? "",
               description: r.values.description ?? "",
@@ -109,13 +133,35 @@ export class CmsDashboardService {
               actionUrl: safeLink(r.values.actionUrl),
               footerText: r.values.footerText ?? "",
             }))
-            .sort((a, b) => a.order - b.order)
         : null;
     } catch (err) {
       console.warn("⚠️ Could not load partners from SI3 CMS:", (err as Error).message);
       if (partnersCache) return partnersCache.value;
     }
     partnersCache = { expiresAt: Date.now() + CACHE_TTL_MS, value };
+    return value;
+  }
+
+  /**
+   * Heading, subtitle and referral note for the partners block. Each falls
+   * back to the default wording when its CMS field is missing or empty.
+   */
+  static async getPartnersCopy(): Promise<PartnersCopy> {
+    if (partnersCopyCache && partnersCopyCache.expiresAt > Date.now()) return partnersCopyCache.value;
+    let value: PartnersCopy = PARTNERS_COPY_DEFAULTS;
+    try {
+      const rows = await readCmsTable(PARTNERS_SECTION);
+      const v = rows?.[0]?.values ?? {};
+      value = {
+        heading: v.heading?.trim() || PARTNERS_COPY_DEFAULTS.heading,
+        subheading: v.subheading?.trim() || PARTNERS_COPY_DEFAULTS.subheading,
+        referralNote: v.referralNote?.trim() || PARTNERS_COPY_DEFAULTS.referralNote,
+      };
+    } catch (err) {
+      console.warn("⚠️ Could not load the partners copy from SI3 CMS:", (err as Error).message);
+      if (partnersCopyCache) return partnersCopyCache.value;
+    }
+    partnersCopyCache = { expiresAt: Date.now() + CACHE_TTL_MS, value };
     return value;
   }
 
