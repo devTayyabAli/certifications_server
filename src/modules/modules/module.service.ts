@@ -1,7 +1,7 @@
 import { Types } from "mongoose";
 import { env } from "../../config/env";
 import { CalendarType } from "../../constants/calendar";
-import { CalendarSchedule } from "../../models/calendar-schedule.model";
+import { CalendarSchedule, ICalendarSchedule } from "../../models/calendar-schedule.model";
 import { Certificate } from "../../models/certificate.model";
 import { IModule, Module } from "../../models/module.model";
 import { Profile } from "../../models/profile.model";
@@ -73,11 +73,23 @@ async function toModuleItem(
   ctx: {
     progress: IUserProgress | null;
     quiz?: IQuiz;
-    schedule?: string | null;
+    schedule?: ICalendarSchedule | null;
     withSpeakers?: boolean;
   }
 ) {
   const state = sessionState(m);
+  // The learner's calendar record for this session. It counts only if it still
+  // matches the session by title or by time: a record matching neither belongs
+  // to another session (module records can be re-mapped when the CMS changes).
+  const sameSlot =
+    !!ctx.schedule &&
+    !!m.scheduledDate &&
+    Math.abs(new Date(ctx.schedule.scheduledDate).getTime() - m.scheduledDate.getTime()) <= 60 * 1000;
+  const sameTitle = !!ctx.schedule && ctx.schedule.sessionTitle?.trim() === m.title?.trim();
+  const schedule = ctx.schedule && (sameSlot || sameTitle) ? ctx.schedule : null;
+  // Added before the session's date or time changed: the learner's calendar has
+  // the old slot, so it's no longer shown as added
+  const calendarOutdated = !!schedule && !sameSlot;
   const speakers = ctx.withSpeakers
     ? (await ModuleCatalogService.speakersFor(m)).map(speakerItem)
     : [];
@@ -111,10 +123,24 @@ async function toModuleItem(
     isCompleted: completed,
     badge: { name: m.badgeName || `Week ${m.week} badge`, image: m.badgeImageUrl || "/Badge_earned.png" },
     quiz: quizSummary(ctx.quiz, ctx.progress, isQuizOpen(state)),
-    isScheduled: !!ctx.schedule,
-    scheduledProvider: ctx.schedule ?? null,
+    isScheduled: !!schedule && !calendarOutdated,
+    scheduledProvider: schedule?.calendarType ?? null,
+    /** added to a calendar, but the session has moved since: add it again */
+    calendarOutdated,
+    addedToCalendarAt: schedule?.updatedAt ?? null,
     speakers,
   };
+}
+
+/** A real IANA time zone name the runtime knows ("Asia/Karachi"), not arbitrary text. */
+function isTimeZone(value: unknown): value is string {
+  if (typeof value !== "string" || value.length > 64) return false;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function calendarEvent(moduleDoc: IModule) {
@@ -144,7 +170,7 @@ export class ModuleService {
       CalendarSchedule.find({ user: userId, status: "scheduled" }),
       Quiz.find({ module: { $in: modules.map((m) => m._id) } }),
     ]);
-    const scheduleMap = new Map(schedules.map((s) => [s.module.toString(), s.calendarType]));
+    const scheduleMap = new Map(schedules.map((s) => [s.module.toString(), s]));
     const quizMap = new Map(quizzes.map((q) => [q.module.toString(), q]));
 
     return Promise.all(
@@ -169,7 +195,7 @@ export class ModuleService {
     return toModuleItem(moduleDoc, {
       progress,
       quiz: quiz ?? undefined,
-      schedule: schedule?.calendarType ?? null,
+      schedule: schedule ?? null,
       withSpeakers: true,
     });
   }
@@ -211,7 +237,8 @@ export class ModuleService {
   static async scheduleModuleSession(
     slugOrId: string,
     userId: Types.ObjectId,
-    calendarType: CalendarType = "google"
+    calendarType: CalendarType = "google",
+    timezone?: string
   ) {
     const moduleDoc = await findPublishedModule(slugOrId);
     const event = calendarEvent(moduleDoc);
@@ -223,8 +250,11 @@ export class ModuleService {
         module: moduleDoc._id,
         calendarType,
         sessionTitle: moduleDoc.title,
+        // the session's slot at the time it was added, to spot later date changes
         scheduledDate: event.startDate,
         endDate: event.endDate,
+        // the learner's own zone (IANA, e.g. "Asia/Karachi"), for reminders in their time
+        timezone: isTimeZone(timezone) ? timezone : "UTC",
         status: "scheduled",
       },
       { upsert: true, new: true }

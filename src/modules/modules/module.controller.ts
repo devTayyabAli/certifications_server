@@ -36,7 +36,7 @@ export class ModuleController {
     const userId = req.user!._id;
     const { id } = req.params;
     const calendarType = toCalendarType(req.body?.calendarType);
-    const result = await ModuleService.scheduleModuleSession(id, userId, calendarType);
+    const result = await ModuleService.scheduleModuleSession(id, userId, calendarType, req.body?.timezone);
     return ApiResponse.success(res, {
       message: `Session added to ${CALENDAR_LABELS[calendarType]}`,
       data: result,
