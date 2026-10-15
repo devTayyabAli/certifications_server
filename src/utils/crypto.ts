@@ -35,3 +35,23 @@ export function generateVerificationCode(): string {
 export function generateNonce(): string {
   return crypto.randomBytes(16).toString("hex");
 }
+
+/**
+ * The secret part of a learner's private calendar-feed link. Calendar apps
+ * can't sign in, so the link itself is the key: `<userId>.<signature>`.
+ * Signed with CALENDAR_FEED_SECRET (falling back to JWT_SECRET), so rotating
+ * the JWT secret needn't break links people already subscribed to.
+ */
+export function calendarFeedToken(userId: string, secret: string): string {
+  const signature = crypto.createHmac("sha256", secret).update(`calendar-feed:${userId}`).digest("base64url");
+  return `${userId}.${signature.slice(0, 32)}`;
+}
+
+/** The learner a feed token belongs to, or null when it was tampered with. */
+export function userIdFromCalendarFeedToken(token: string, secret: string): string | null {
+  const userId = token.split(".")[0];
+  if (!/^[a-f0-9]{24}$/i.test(userId)) return null;
+  const expected = Buffer.from(calendarFeedToken(userId, secret));
+  const given = Buffer.from(token);
+  return given.length === expected.length && crypto.timingSafeEqual(given, expected) ? userId : null;
+}

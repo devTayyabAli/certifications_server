@@ -17,6 +17,9 @@ const envSchema = z.object({
   // Tokens are only accepted when issued by this API for this app
   JWT_ISSUER: z.string().default("siherdefi-api"),
   JWT_AUDIENCE: z.string().default("siherdefi-app"),
+  // Signs learners' private calendar-subscription links. Optional (JWT_SECRET is
+  // used when empty), but set it so rotating JWT_SECRET keeps those links working
+  CALENDAR_FEED_SECRET: z.string().default(""),
   CORS_ORIGIN: z.string().default("http://localhost:3000,http://127.0.0.1:3000"),
   // Proxies in front of the API (Render, Nginx, Cloudflare…): 1 for one hop.
   // Needed so rate limits see each learner's real IP, not the proxy's.

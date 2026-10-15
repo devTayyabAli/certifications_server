@@ -14,6 +14,8 @@ export interface CalendarEventPayload {
   timezone?: string;
   organizerName?: string;
   organizerEmail?: string;
+  /** No start time yet: shown as an all-day event on its date */
+  allDay?: boolean;
 }
 
 /**
@@ -219,18 +221,25 @@ export function generateOffice365CalendarUrl(event: CalendarEventPayload): strin
   return `https://outlook.office.com/calendar/0/deeplink/compose?${params.toString()}`;
 }
 
-/**
- * Generate standard RFC 5545 iCalendar (.ics) content for Apple Calendar, Outlook, and universal iCal
- */
-export function generateIcsContent(event: CalendarEventPayload): string {
+/** "20261209": an all-day date, from the event's UTC calendar day. */
+function formatCalendarDate(date: Date): string {
+  return formatCalendarUtcDate(date).slice(0, 8);
+}
+
+/** One VEVENT (with a 15-minute reminder), unfolded. */
+function icsEventLines(event: CalendarEventPayload): string[] {
   const start = parseValidDate(event.startDate);
   const end = event.endDate ? parseValidDate(event.endDate) : new Date(start.getTime() + 60 * 60 * 1000);
 
   const uid = event.uid || `siherdefi-${Date.now()}@siherdefi.org`;
   const dtStamp = formatCalendarUtcDate(new Date());
-  const dtStart = formatCalendarUtcDate(start);
-  const dtEnd = formatCalendarUtcDate(end);
-  const timezone = event.timezone || "UTC";
+  // A date without a time yet is an all-day event (DTEND is exclusive: the next day)
+  const when = event.allDay
+    ? [
+        `DTSTART;VALUE=DATE:${formatCalendarDate(start)}`,
+        `DTEND;VALUE=DATE:${formatCalendarDate(new Date(start.getTime() + 24 * 60 * 60 * 1000))}`,
+      ]
+    : [`DTSTART:${formatCalendarUtcDate(start)}`, `DTEND:${formatCalendarUtcDate(end)}`];
 
   const sanitizedUrl = sanitizeCalendarUrl(event.url);
   const isRoam = sanitizedUrl?.includes("ro.am");
@@ -245,6 +254,30 @@ export function generateIcsContent(event: CalendarEventPayload): string {
       : event.location || "Si Her DeFi Virtual Stage"
   );
 
+  return [
+    "BEGIN:VEVENT",
+    `UID:${uid}`,
+    `DTSTAMP:${dtStamp}`,
+    ...when,
+    `SUMMARY:${summary}`,
+    `DESCRIPTION:${description}`,
+    `LOCATION:${location}`,
+    ...(sanitizedUrl ? [`URL:${sanitizedUrl}`] : []),
+    "STATUS:CONFIRMED",
+    event.allDay ? "TRANSP:TRANSPARENT" : "TRANSP:OPAQUE",
+    "SEQUENCE:0",
+    // An all-day placeholder gets no "starts in 15 minutes" alert
+    ...(event.allDay
+      ? []
+      : ["BEGIN:VALARM", "TRIGGER:-PT15M", "ACTION:DISPLAY", `DESCRIPTION:Reminder: ${summary}`, "END:VALARM"]),
+    "END:VEVENT",
+  ];
+}
+
+/**
+ * Generate standard RFC 5545 iCalendar (.ics) content for Apple Calendar, Outlook, and universal iCal
+ */
+export function generateIcsContent(event: CalendarEventPayload): string {
   const lines = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
@@ -252,25 +285,32 @@ export function generateIcsContent(event: CalendarEventPayload): string {
     "CALSCALE:GREGORIAN",
     "METHOD:PUBLISH",
     "X-WR-CALNAME:Si Her DeFi Sessions",
-    `X-WR-TIMEZONE:${timezone}`,
-    "BEGIN:VEVENT",
-    `UID:${uid}`,
-    `DTSTAMP:${dtStamp}`,
-    `DTSTART:${dtStart}`,
-    `DTEND:${dtEnd}`,
-    `SUMMARY:${summary}`,
-    `DESCRIPTION:${description}`,
-    `LOCATION:${location}`,
-    ...(sanitizedUrl ? [`URL:${sanitizedUrl}`] : []),
-    "STATUS:CONFIRMED",
-    "TRANSP:OPAQUE",
-    "SEQUENCE:0",
-    "BEGIN:VALARM",
-    "TRIGGER:-PT15M",
-    "ACTION:DISPLAY",
-    `DESCRIPTION:Reminder: ${summary}`,
-    "END:VALARM",
-    "END:VEVENT",
+    `X-WR-TIMEZONE:${event.timezone || "UTC"}`,
+    ...icsEventLines(event),
+    "END:VCALENDAR",
+  ];
+
+  return lines.map((l) => foldIcsLine(l)).join("\r\n");
+}
+
+/**
+ * A calendar learners subscribe to by URL (Google, Apple, Proton, Outlook): every
+ * session in one feed. Each event keeps its UID, so a changed time or link
+ * updates the event in place when the calendar app refreshes.
+ */
+export function generateIcsFeed(events: CalendarEventPayload[], name = "Si Her DeFi"): string {
+  const lines = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//Si Her DeFi//Cohort Learning Schedule//EN",
+    "CALSCALE:GREGORIAN",
+    "METHOD:PUBLISH",
+    `X-WR-CALNAME:${escapeIcsText(name)}`,
+    "X-WR-CALDESC:Every Si Her DeFi live session and cohort event. Times and links update automatically.",
+    // How often calendar apps should check for changes (most treat it as a hint)
+    "REFRESH-INTERVAL;VALUE=DURATION:PT6H",
+    "X-PUBLISHED-TTL:PT6H",
+    ...events.flatMap(icsEventLines),
     "END:VCALENDAR",
   ];
 

@@ -143,7 +143,7 @@ function isTimeZone(value: unknown): value is string {
   }
 }
 
-function calendarEvent(moduleDoc: IModule) {
+export function calendarEvent(moduleDoc: IModule) {
   const startDate = moduleDoc.scheduledDate;
   if (!startDate) throw ApiError.badRequest("This session doesn't have a date yet.");
   const endDate = moduleDoc.endDate || new Date(startDate.getTime() + 60 * 60 * 1000);

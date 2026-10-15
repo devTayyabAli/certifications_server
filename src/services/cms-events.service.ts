@@ -173,8 +173,27 @@ export const SEED_EVENTS: CmsCohortEvent[] = [
   },
 ];
 
+/** CMS edits show up in the app within a minute; every request in between is served from memory. */
+const CACHE_TTL_MS = 60 * 1000;
+let cache: { expiresAt: number; events: CmsCohortEvent[] } | null = null;
+let inFlight: Promise<CmsCohortEvent[]> | null = null;
+
 export class CmsEventsService {
   static async getAllEvents(): Promise<CmsCohortEvent[]> {
+    if (cache && cache.expiresAt > Date.now()) return cache.events;
+    // Requests arriving together share one CMS read
+    inFlight ??= this.loadEvents()
+      .then((events) => {
+        cache = { expiresAt: Date.now() + CACHE_TTL_MS, events };
+        return events;
+      })
+      .finally(() => {
+        inFlight = null;
+      });
+    return inFlight;
+  }
+
+  private static async loadEvents(): Promise<CmsCohortEvent[]> {
     // 1. The CMS (Si Her DeFi (Base) page → Events). Once the list exists it is
     //    the only source — an empty list means no events, never the old seed.
     try {
