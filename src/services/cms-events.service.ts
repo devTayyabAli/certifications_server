@@ -11,6 +11,24 @@ const DEFAULT_DURATION_MINUTES = 60;
 const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
 /**
+ * Start Time as the team writes it, e.g. "Dec 9 · 1–2 PM ET" or "11–12 PM ET":
+ * drops a leading date ("Dec 9 ·") and splits a range into start and end
+ * clocks. The start takes the end's AM/PM unless that would put it after the
+ * end ("11–12 PM" → 11 AM). Anything else is passed through as the start.
+ */
+export function splitStartTime(value: string | undefined): { start?: string; end?: string } {
+  const text = (value ?? "").split("·").pop()!.trim();
+  const range = text.match(
+    /^(\d{1,2})(?::(\d{2}))?\s*([ap]\.?m\.?)?\s*(?:[-–—]|to)\s*(\d{1,2})(?::(\d{2}))?\s*([ap]\.?m\.?)?\s*\(?([a-z]{1,4})?\)?$/i
+  );
+  if (!range) return { start: text || undefined };
+  const [, sh, sm = "00", smer, eh, em = "00", emer, zone = ""] = range;
+  const startMer = smer ?? (emer && Number(sh) % 12 > Number(eh) % 12 ? (/^p/i.test(emer) ? "AM" : "PM") : emer);
+  const clock = (h: string, m: string, mer?: string) => `${h}:${m}${mer ? ` ${mer}` : ""}${zone ? ` ${zone}` : ""}`;
+  return { start: clock(sh, sm, startMer), end: clock(eh, em, emer) };
+}
+
+/**
  * The event's button. Until registration opens it's a grayed-out "Save the
  * Date" that can't be clicked. Both can be set in the CMS (`cta_active`,
  * `cta_text`); left empty, the button is live only once the event has its own
@@ -59,7 +77,7 @@ export const EVENTS_TABLE: CmsTableDef = {
   fields: [
     { key: "id", columnId: "col-event-id", name: "Event ID", type: "string" },
     { key: "kind", columnId: "col-event-kind", name: "Kind", type: "string", defaultValue: "linkedin-live" },
-    { key: "title", columnId: "col-event-title", name: "Title", type: "string", required: true },
+    { key: "title", columnId: "col-event-title", name: "Title", type: "string", required: true, aliases: ["Event Title", "Event Name"] },
     { key: "subtitle", columnId: "col-event-subtitle", name: "Subtitle", type: "string" },
     { key: "active", columnId: "col-event-active", name: "Active", type: "string", defaultValue: "true" },
     { key: "date", columnId: "col-event-date", name: "Date", type: "string", required: true, aliases: ["Event Date", "Session Date"] },
@@ -80,16 +98,28 @@ export function fromCmsRecord(r: CmsRecord): CmsCohortEvent | null {
   const v = r.values;
   if (!v.title || !cmsBoolean(v.active, true)) return null;
 
-  // No start time (or Time TBA ticked) → the date is shown with "Time to be announced"
-  const timeTba = !v.startTime?.trim() || cmsBoolean(v.timeTba, false);
-  const start = parseStart(v.date, timeTba ? TBA_CLOCK : v.startTime);
+  // No start time (or Time TBA ticked) → the date is shown with "Time to be announced".
+  // A start time that can't be read ("TBA", "Noon ET") is treated the same way,
+  // so a known date never hides the whole event.
+  const clocks = splitStartTime(v.startTime);
+  let timeTba = !clocks.start || cmsBoolean(v.timeTba, false);
+  let start = parseStart(v.date, timeTba ? TBA_CLOCK : clocks.start);
+  if (!start && !timeTba) {
+    start = parseStart(v.date, TBA_CLOCK);
+    if (start) {
+      timeTba = true;
+      console.warn(`⚠️ Event "${v.title}": couldn't read Start Time "${v.startTime}", showing "Time to be announced" (use e.g. "12:00 PM ET").`);
+    }
+  }
   if (!start) {
     console.warn(
       `⚠️ Event "${v.title}": couldn't read Date "${v.date ?? ""}" / Start Time "${v.startTime ?? ""}" (use e.g. 2026-11-18 and "12:00 PM ET").`
     );
     return null;
   }
-  const explicitEnd = v.endDate ? new Date(v.endDate) : null;
+  // an end date wins, then the end of a Start Time range ("1–2 PM ET"), then the duration
+  const rangeEnd = !timeTba && clocks.end ? parseStart(v.date, clocks.end) : null;
+  const explicitEnd = v.endDate ? new Date(v.endDate) : rangeEnd && rangeEnd > start ? rangeEnd : null;
   const end =
     explicitEnd && !Number.isNaN(explicitEnd.getTime())
       ? explicitEnd
