@@ -1,5 +1,5 @@
 import { env } from "../config/env";
-import { CmsTableDef, cmsBoolean, cmsNumber, readCmsTable, readPageSubsections } from "./cms-table.service";
+import { CmsTableDef, cmsBoolean, cmsNumber, mapCmsItems, readCmsTable, readPageSubsections } from "./cms-table.service";
 
 /**
  * Cohort modules and their quizzes, managed by the Si Her team in the SI3 CMS
@@ -86,6 +86,8 @@ export const MODULES_TABLE: CmsTableDef = {
     { key: "badgeName", columnId: "col-mod-badge", name: "Badge Name", type: "string" },
     { key: "badgeImage", columnId: "col-mod-badge-img", name: "Badge Image", type: "image" },
     { key: "unlocksCertificate", columnId: "col-mod-cert", name: "Unlocks Certificate", type: "string", defaultValue: "false" },
+    // the module's own quiz, written right under it (see parseQuizText)
+    { key: "quiz", columnId: "col-mod-quiz", name: "Quiz", type: "text", aliases: ["Quiz Questions", "Questions"] },
     {
       key: "open",
       columnId: "col-mod-open",
@@ -383,6 +385,73 @@ export function defaultDateLabel(week: number, startsAt: Date | null) {
   return `WEEK ${pad(week)}${when}`;
 }
 
+const QUIZ_LABELS: [RegExp, string][] = [
+  [/^(?:q|question)\s*\d*$/, "question"],
+  [/^(?:option\s*)?a$/, "optionA"],
+  [/^(?:option\s*)?b$/, "optionB"],
+  [/^(?:option\s*)?c$/, "optionC"],
+  [/^(?:option\s*)?d$/, "optionD"],
+  [/^(?:answer|correct|correct\s*(?:option|answer))$/, "correct"],
+  [/^(?:explanation|why)$/, "explanation"],
+  [/^(?:hint|hint\s*timestamp|review|timestamp)$/, "hintTimestamp"],
+  [/^(?:hint\s*title|review\s*title)$/, "hintTitle"],
+];
+
+/**
+ * A module's quiz written as text in its own "Quiz" field, one question after
+ * another, each starting with "Q:":
+ *
+ *   Q: What is a stablecoin designed to do?
+ *   A: Keep a steady value
+ *   B: Pay interest
+ *   C: Replace banks
+ *   D: Track Bitcoin
+ *   Answer: A
+ *   Explanation: Stablecoins aim to hold a steady price.
+ *   Hint: 12:30 - 14:00
+ *   Hint title: What a stablecoin is
+ *
+ * Options may also be written "A)" or "A.". A line without a label carries on
+ * the line before it. Returns the questions as question-field values.
+ */
+export function parseQuizText(text: string | undefined): Record<string, string>[] {
+  const out: Record<string, string>[] = [];
+  let current: Record<string, string> | null = null;
+  let last: string | null = null;
+  for (const raw of (text ?? "").split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    const option = line.match(/^\(?([A-Da-d])[).]\s+(.*)$/);
+    const labelled = line.match(/^([A-Za-z][A-Za-z0-9 ]{0,20}?)\s*:\s*(.*)$/);
+    let key: string | null = null;
+    let value = "";
+    if (option) {
+      key = `option${option[1].toUpperCase()}`;
+      value = option[2];
+    } else if (labelled) {
+      const label = labelled[1].trim().toLowerCase();
+      key = QUIZ_LABELS.find(([re]) => re.test(label))?.[1] ?? null;
+      value = labelled[2];
+    }
+    if (key === "question" || (!current && key)) {
+      current = {};
+      out.push(current);
+    }
+    if (key && current) {
+      current[key] = value.trim();
+      last = key;
+    } else if (current && last) {
+      current[last] = `${current[last]}${last === "explanation" || last === "question" ? "\n" : " "}${line}`.trim();
+    } else if (!current) {
+      // text before the first "Q:" is taken as the first question
+      current = { question: line };
+      out.push(current);
+      last = "question";
+    }
+  }
+  return out.filter((q) => q.question);
+}
+
 const CACHE_TTL_MS = 60 * 1000;
 let cache: { expiresAt: number; value: CmsModuleCatalog | null } | null = null;
 
@@ -396,6 +465,8 @@ async function load(): Promise<CmsModuleCatalog | null> {
 
   const warnings: string[] = [];
   const modules: CmsModule[] = [];
+  /** questions written on the module itself: a nested questions list, or its Quiz text */
+  const ownQuestions = new Map<number, Record<string, string>[]>();
   const usedSlugs = new Set<string>();
   const usedWeeks = new Set<number>();
 
@@ -427,6 +498,13 @@ async function load(): Promise<CmsModuleCatalog | null> {
     }
     const duration = cmsNumber(v.durationMinutes, DEFAULT_DURATION_MINUTES);
     const passMark = cmsNumber(v.passMark, NaN);
+
+    const nested = Object.entries(row.lists ?? {}).find(([name]) =>
+      ["quizquestions", "questions", "quiz"].includes(name.toLowerCase().replace(/[^a-z]/g, ""))
+    )?.[1];
+    const own = nested?.length ? mapCmsItems(nested, QUIZ_QUESTIONS_TABLE) : parseQuizText(v.quiz);
+    if (own.length > 0) ownQuestions.set(week, own);
+    else if (v.quiz?.trim()) warnings.push(`Module "${title}": couldn't read any question in its Quiz field — start each one with "Q:".`);
 
     modules.push({
       cmsRowId: row.rowId,
@@ -492,6 +570,17 @@ async function load(): Promise<CmsModuleCatalog | null> {
 
   const questionsByWeek = new Map<number, CmsQuizQuestion[]>();
 
+  // 0. Questions written right under the module (its own list or Quiz field) win
+  for (const [week, rows] of ownQuestions) {
+    const list: CmsQuizQuestion[] = [];
+    for (const v of rows) {
+      if (!v.question || !cmsBoolean(v.active, true)) continue;
+      const q = toQuestion(v, week, list.length + 1);
+      if (q) list.push(q);
+    }
+    questionsByWeek.set(week, list);
+  }
+
   // 1. One sub-section per module inside "quiz_questions" (e.g. "Week 1 · Si Her
   //    Collective Capital") with that module's questions in order. The module is
   //    found from a Week field on the sub-section, "Week N" in its name, or its
@@ -505,13 +594,14 @@ async function load(): Promise<CmsModuleCatalog | null> {
     const byTitle = modules.find((m) => plain(title).includes(plain(m.title)) && plain(m.title).length > 0);
     return byTitle ? byTitle.week : NaN;
   };
-  const groupedWeeks = new Set<number>();
+  const groupedWeeks = new Set<number>(ownQuestions.keys());
   for (const group of questionGroups ?? []) {
     const week = weekFromGroup(group.title, group.values);
     if (!Number.isInteger(week)) {
       warnings.push(`Quiz sub-section "${group.title}" skipped — name it "Week N · Module title" (or match a module title).`);
       continue;
     }
+    if (ownQuestions.has(week)) continue; // the module's own questions win
     const list = questionsByWeek.get(week) ?? [];
     for (const row of group.rows) {
       const v = row.values;

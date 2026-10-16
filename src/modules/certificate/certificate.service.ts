@@ -66,6 +66,23 @@ async function earnedBadges(progress: IUserProgress | null) {
     .sort((a, b) => (a.week ?? 99) - (b.week ?? 99));
 }
 
+/**
+ * Published modules the learner hasn't finished (passed, or skipped after
+ * using every attempt). The certificate can only be claimed on-chain once
+ * this is empty; until then it's shown as it fills up with badges.
+ */
+async function modulesLeft(progress: IUserProgress | null) {
+  const modules = await Module.find({ isPublished: true }, { week: 1, title: 1, slug: 1 }).sort({ week: 1 });
+  const passed = new Set((progress?.completedModules ?? []).map((id) => id.toString()));
+  const skippedQuizIds = (progress?.skippedQuizzes ?? []).map((s) => s.quiz);
+  const skipped = new Set(
+    skippedQuizIds.length
+      ? (await Quiz.find({ _id: { $in: skippedQuizIds } }, { module: 1 })).map((q) => q.module.toString())
+      : []
+  );
+  return modules.filter((m) => !passed.has(m._id.toString()) && !skipped.has(m._id.toString()));
+}
+
 /** Makes sure the certificate record matches the learner's current progress. */
 async function syncCertificate(userId: Types.ObjectId, progress: IUserProgress | null) {
   const [profile, user] = await Promise.all([Profile.findOne({ user: userId }), User.findById(userId)]);
@@ -180,6 +197,8 @@ export class CertificateService {
       })
       .map((m) => ({ week: m.week, title: m.title, slug: m.slug }));
     const prerequisite = modules.find((m) => m.isPrerequisiteForCertificate);
+    const left = await modulesLeft(progress);
+    const allModulesDone = left.length === 0;
 
     // What's already in the learner's wallet, so the page knows what's left to claim
     const wallet = isAddress(user.walletAddress ?? "") ? user.walletAddress! : null;
@@ -197,7 +216,8 @@ export class CertificateService {
     const claimable = held
       ? {
           moduleIds: [...new Set(earnedWeeks)].filter((w) => !held!.has(w)).sort((a, b) => a - b),
-          capstone: cert.status === "unlocked" && !held.has(CAPSTONE_TOKEN_ID),
+          // the certificate itself only once every module is done
+          capstone: cert.status === "unlocked" && allModulesDone && !held.has(CAPSTONE_TOKEN_ID),
         }
       : null;
     const claimPending =
@@ -215,6 +235,9 @@ export class CertificateService {
       badges,
       totalBadges: COHORT_BADGE_TOTAL,
       stillOpen,
+      // the certificate can be claimed on-chain only when every module is done
+      allModulesDone,
+      modulesLeft: left.map((m) => ({ week: m.week, title: m.title, slug: m.slug })),
       onChain: onChain(cert),
       // earned badges (and the certificate, once unlocked) not yet in the wallet; null if unknown
       claimable,
@@ -273,7 +296,7 @@ export class CertificateService {
   /**
    * A signed voucher the learner's wallet sends to `claim()` on the contract:
    * every module badge they've earned that isn't in their wallet yet, plus the
-   * certificate once it's unlocked. The learner signs and pays the gas; the
+   * certificate once it's unlocked and every module is done. The learner signs and pays the gas; the
    * contract checks the voucher, so nothing unearned can be claimed.
    */
   static async claimVoucher(userId: Types.ObjectId) {
@@ -289,7 +312,8 @@ export class CertificateService {
     const weeks = (await earnedBadges(progress)).map((b) => b.week).filter((w): w is number => w !== null);
     let voucher;
     try {
-      voucher = await buildVoucher(wallet, weeks, cert.status === "unlocked");
+      const allDone = (await modulesLeft(progress)).length === 0;
+      voucher = await buildVoucher(wallet, weeks, cert.status === "unlocked" && allDone);
     } catch (err) {
       console.error("❌ Could not prepare a claim voucher:", (err as Error).message);
       throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, `${badgeErrorMessage(err)} Please try again in a moment.`);

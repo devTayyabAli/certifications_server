@@ -57,6 +57,24 @@ export interface CmsRecord {
   /** Stable id of the CMS row — survives edits to its content */
   rowId: string;
   values: Record<string, string>;
+  /** Lists nested inside a page list item (e.g. a module's own quiz questions), by field name */
+  lists?: Record<string, Record<string, unknown>[]>;
+}
+
+/** The list-of-items values inside a raw CMS item, keyed by their field name. */
+function nestedLists(raw: Record<string, unknown>) {
+  const out: Record<string, Record<string, unknown>[]> = {};
+  for (const [name, value] of Object.entries(raw ?? {})) {
+    if (Array.isArray(value) && value.some((v) => v && typeof v === "object" && !Array.isArray(v))) {
+      out[name] = value.filter((v) => v && typeof v === "object") as Record<string, unknown>[];
+    }
+  }
+  return out;
+}
+
+/** Maps nested list items onto a definition's fields (e.g. a module's quiz questions). */
+export function mapCmsItems(items: Record<string, unknown>[], def: CmsTableDef): Record<string, string>[] {
+  return items.map((item) => mapByName(item, def));
 }
 
 export function cmsDb() {
@@ -269,10 +287,12 @@ async function readPageRecords(def: CmsTableDef): Promise<CmsRecord[] | null> {
   if (!Array.isArray(items)) return [];
 
   return items.map((item, index) => {
-    const values = mapByName((item ?? {}) as Record<string, unknown>, def);
+    const raw = (item ?? {}) as Record<string, unknown>;
+    const values = mapByName(raw, def);
     return {
       rowId: def.page?.itemId ? def.page.itemId(values, index) : `${wanted}-${listName}-${index + 1}`,
       values,
+      lists: nestedLists(raw),
     };
   });
 }
