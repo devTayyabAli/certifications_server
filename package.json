@@ -15,6 +15,7 @@
     "add-user": "tsx src/add-user.ts",
     "cms:onboarding": "tsx src/scripts/setup-onboarding-cms.ts",
     "cms:onboarding:check": "tsx src/scripts/check-onboarding-cms.ts",
+    "cms:onboarding:group": "tsx src/scripts/group-onboarding-research-questions.ts",
     "onboarding:reset": "tsx src/scripts/reset-onboarding.ts",
     "cms:modules:check": "tsx src/scripts/check-modules-cms.ts",
     "progress:reset": "tsx src/scripts/reset-progress.ts"

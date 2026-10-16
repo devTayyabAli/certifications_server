@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { CALENDAR_LABELS, toCalendarType } from "../../constants/calendar";
 import { CalendarSchedule } from "../../models/calendar-schedule.model";
+import { CalendarFeedService } from "../../services/calendar-feed.service";
 import { CalendarService } from "../../services/calendar.service";
 import { EmailService } from "../../services/email.service";
 import { ApiError } from "../../utils/api-error";
@@ -9,6 +10,37 @@ import { asyncHandler } from "../../utils/async-handler";
 import { ModuleService } from "../modules/module.service";
 
 export class CalendarController {
+  /**
+   * The learner's private subscription feed (every session, kept up to date).
+   * Public, since calendar apps can't sign in: the signed token in the URL is the key.
+   * GET /api/v1/calendar/feed/:token.ics
+   */
+  static getFeed = asyncHandler(async (req: Request, res: Response) => {
+    const token = String(req.params.file ?? "").replace(/\.ics$/i, "");
+    const ics = await CalendarFeedService.feedFor(token);
+    if (!ics) throw ApiError.notFound("Calendar not found");
+
+    res.setHeader("Content-Type", "text/calendar; charset=utf-8");
+    res.setHeader("Content-Disposition", 'inline; filename="si-her-defi.ics"');
+    // Personal (it holds session links) and refreshed by the calendar app itself
+    res.setHeader("Cache-Control", "private, max-age=900");
+    return res.send(ics);
+  });
+
+  /**
+   * The signed-in learner's subscribe links (feed URL + one-click Google / Apple / Outlook)
+   * GET /api/v1/calendar/feed-link
+   */
+  static getFeedLink = asyncHandler(async (req: Request, res: Response) => {
+    // Behind Vercel's proxy the original scheme is in x-forwarded-proto
+    const proto = String(req.get("x-forwarded-proto") ?? req.protocol).split(",")[0].trim();
+    const baseUrl = `${proto}://${req.get("host")}${req.baseUrl}`;
+    return ApiResponse.success(res, {
+      message: "Calendar subscription links",
+      data: CalendarFeedService.links(String(req.user!._id), baseUrl),
+    });
+  });
+
   /**
    * Get all sessions scheduled by the authenticated user
    */

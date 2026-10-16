@@ -256,7 +256,8 @@ function zonedToUtc(y: number, m: number, d: number, h: number, min: number, tim
  */
 function parseClock(value: string | undefined) {
   const text = (value || DEFAULT_START_TIME).trim();
-  const m = text.match(/^(\d{1,2})(?::(\d{2}))?\s*([ap]\.?m\.?)?\s*([a-z]{1,4})?\b/i);
+  // the zone may be in brackets: "12:00 PM (ET)"
+  const m = text.match(/^(\d{1,2})(?::(\d{2}))?\s*([ap]\.?m\.?)?\s*\(?([a-z]{1,4})?\b/i);
   if (!m) return null;
   let hours = Number(m[1]);
   const minutes = Number(m[2] ?? 0);

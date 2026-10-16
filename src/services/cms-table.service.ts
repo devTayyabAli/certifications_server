@@ -76,6 +76,8 @@ function toText(value: unknown): string | null {
   if (typeof value === "string") return value.trim();
   if (typeof value === "number" && Number.isFinite(value)) return String(value);
   if (typeof value === "boolean") return value ? "true" : "false";
+  // Date pickers can store a real date
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value.toISOString();
   // Checkbox / multi-select form fields store a list of choices
   if (Array.isArray(value)) {
     const parts = value.map(toText).filter((v): v is string => !!v);
@@ -192,6 +194,11 @@ export async function readPageSubsections(def: CmsTableDef): Promise<CmsSubsecti
   return out;
 }
 
+/** A node and every sub-section inside it, parent first. */
+function withSubsections(node: PageNode): PageNode[] {
+  return [node, ...(node.children ?? []).flatMap(withSubsections)];
+}
+
 /** The Si Her DeFi page's published sections (the definition's own section first), or `null` if the page isn't set up. */
 async function pageSections(def: CmsTableDef) {
   if (!def.page) return null;
@@ -234,21 +241,26 @@ async function readPageRecords(def: CmsTableDef): Promise<CmsRecord[] | null> {
   if (!def.page.list) {
     const section = sections.find(isNamed);
     if (!section) return null;
-    return [{ rowId: `${wanted}`, values: mapByName(section.data?.tree?.data ?? {}, def) }];
+    // Fields can be grouped into sub-sections (e.g. Onboarding → Research Questions);
+    // the section's own fields win over a sub-section's
+    const nodes = withSubsections(section.data?.tree ?? {});
+    const data = Object.assign({}, ...nodes.reverse().map((n) => n.data ?? {}));
+    return [{ rowId: `${wanted}`, values: mapByName(data, def) }];
   }
 
-  // A list can sit in its named section or in a section of its own
+  // A list can sit in its named section, in one of its sub-sections, or in a section of its own
   const listName = normalizeName(def.page.list);
   let tree: PageNode | null = null;
   let listField: NonNullable<PageNode["fields"]>[number] | undefined;
-  for (const section of sections) {
-    const candidate: PageNode = section.data?.tree ?? {};
-    listField = (candidate.fields ?? []).find(
-      (f) => f.type === "array" && [f.name, f.label].some((n) => n && normalizeName(n) === listName)
-    );
-    if (listField?.name) {
-      tree = candidate;
-      break;
+  search: for (const section of sections) {
+    for (const candidate of withSubsections(section.data?.tree ?? {})) {
+      listField = (candidate.fields ?? []).find(
+        (f) => f.type === "array" && [f.name, f.label].some((n) => n && normalizeName(n) === listName)
+      );
+      if (listField?.name) {
+        tree = candidate;
+        break search;
+      }
     }
   }
   // No such list on the page yet → not set up here (fall back to the form)
