@@ -194,7 +194,17 @@ export class ModuleCatalogService {
       // a speaker with a module (Week / sub-section) shows only on that module;
       // name matching is just for speakers that don't say which module they're for
       const own = section.filter((s) => (s.weeks.length > 0 ? s.weeks.includes(m.week) : names.includes(normalize(s.name))));
-      if (own.length > 0) return own;
+      if (own.length > 0) {
+        // names on the module that aren't in the section still come from the SI<3> table
+        const found = new Set(own.map((s) => normalize(s.name)));
+        const rest = names.filter((n) => !found.has(n));
+        if (rest.length === 0) return own;
+        const all = await CmsSpeakerService.getAllSpeakers();
+        const more = rest
+          .map((name) => all.find((s) => normalize(s.name) === name))
+          .filter((s): s is CmsSpeaker => !!s);
+        return [...own, ...more];
+      }
     }
 
     if (names.length > 0) {
