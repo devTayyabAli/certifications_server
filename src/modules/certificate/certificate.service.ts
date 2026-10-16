@@ -176,7 +176,7 @@ export class CertificateService {
       .filter((m) => !passedModuleIds.has(m._id.toString()))
       .filter((m) => {
         const quiz = quizzes.find((q) => q.module.toString() === m._id.toString());
-        return !!quiz?.isActive && quiz.questions.length > 0 && isQuizOpen(sessionState(m));
+        return !!quiz?.isActive && quiz.questions.length > 0 && isQuizOpen(sessionState(m), m.quizOpen);
       })
       .map((m) => ({ week: m.week, title: m.title, slug: m.slug }));
     const prerequisite = modules.find((m) => m.isPrerequisiteForCertificate);

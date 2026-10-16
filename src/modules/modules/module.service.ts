@@ -122,7 +122,7 @@ async function toModuleItem(
     isPrerequisiteForCertificate: m.isPrerequisiteForCertificate,
     isCompleted: completed,
     badge: { name: m.badgeName || `Week ${m.week} badge`, image: m.badgeImageUrl || "/Badge_earned.png" },
-    quiz: quizSummary(ctx.quiz, ctx.progress, isQuizOpen(state)),
+    quiz: quizSummary(ctx.quiz, ctx.progress, isQuizOpen(state, m.quizOpen)),
     isScheduled: !!schedule && !calendarOutdated,
     scheduledProvider: schedule?.calendarType ?? null,
     /** added to a calendar, but the session has moved since: add it again */

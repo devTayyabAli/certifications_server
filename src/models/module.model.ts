@@ -35,6 +35,8 @@ export interface IModule extends Document {
   speakerNames?: string[];
   badgeName?: string;
   badgeImageUrl?: string;
+  /** CMS "Open": true/false opens/closes the quiz by hand; unset = opens when the recording is up */
+  quizOpen?: boolean;
   /** Earlier slugs — old links (calendar events, bookmarks) keep working */
   slugHistory?: string[];
   slug: string;
@@ -76,6 +78,7 @@ const moduleSchema = new Schema<IModule>(
     speakerNames: { type: [String], default: [] },
     badgeName: { type: String },
     badgeImageUrl: { type: String },
+    quizOpen: { type: Boolean },
     slugHistory: { type: [String], default: [], index: true },
     slug: {
       type: String,

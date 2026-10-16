@@ -17,7 +17,7 @@ import { CmsSpeaker, CmsSpeakerService } from "./cms-speaker.service";
 
 const SYNC_INTERVAL_MS = 60 * 1000;
 /** Version of the CMS → database mapping (see the fingerprint in syncNow) */
-const SYNC_VERSION = 3;
+const SYNC_VERSION = 4;
 let lastSyncAt = 0;
 let inFlight: Promise<void> | null = null;
 
@@ -52,6 +52,7 @@ function moduleFields(m: CmsModule) {
     meetingLink: m.liveLink ?? undefined,
     badgeName: m.badgeName,
     badgeImageUrl: m.badgeImage,
+    quizOpen: m.open ?? undefined,
     // Calendar events use the CMS title/description — drop any older override
     calendarTitle: undefined,
     calendarDescription: undefined,
@@ -155,9 +156,13 @@ export function sessionState(
   return now <= end ? "live" : "processing";
 }
 
-/** The quiz opens once the session has happened (live or recorded). */
-export function isQuizOpen(state: SessionState) {
-  return state === "recorded" || state === "processing";
+/**
+ * Whether learners can take the quiz. The CMS "Open" field decides when the
+ * team sets it (Yes / No); left blank, the quiz opens once the edited
+ * recording is up.
+ */
+export function isQuizOpen(state: SessionState, open?: boolean | null) {
+  return open ?? state === "recorded";
 }
 
 function normalize(value: string) {

@@ -86,6 +86,13 @@ export const MODULES_TABLE: CmsTableDef = {
     { key: "badgeName", columnId: "col-mod-badge", name: "Badge Name", type: "string" },
     { key: "badgeImage", columnId: "col-mod-badge-img", name: "Badge Image", type: "image" },
     { key: "unlocksCertificate", columnId: "col-mod-cert", name: "Unlocks Certificate", type: "string", defaultValue: "false" },
+    {
+      key: "open",
+      columnId: "col-mod-open",
+      name: "Open",
+      type: "string",
+      aliases: ["Quiz Open", "Module Open", "Opened", "Open Quiz", "Open Module"],
+    },
     { key: "quizAttempts", columnId: "col-mod-attempts", name: "Quiz Attempts", type: "number", defaultValue: 3 },
     { key: "passMark", columnId: "col-mod-pass", name: "Pass Mark", type: "number" },
     {
@@ -149,6 +156,8 @@ export interface CmsModule {
   badgeName: string;
   badgeImage: string;
   unlocksCertificate: boolean;
+  /** "Open" field: true/false set by the team; null (blank) = opens when the recording is up */
+  open: boolean | null;
   quizAttempts: number;
   /** null = every question must be correct */
   passMark: number | null;
@@ -443,6 +452,7 @@ async function load(): Promise<CmsModuleCatalog | null> {
       badgeName: v.badgeName || `Week ${week} · ${title}`,
       badgeImage: safeUrl(v.badgeImage, { allowRelative: true }) ?? DEFAULT_BADGE_IMAGE,
       unlocksCertificate: cmsBoolean(v.unlocksCertificate, false),
+      open: v.open?.trim() ? cmsBoolean(v.open, false) : null,
       quizAttempts: Math.min(Math.max(Math.round(cmsNumber(v.quizAttempts, 3)), 1), 10),
       passMark: Number.isFinite(passMark) && passMark > 0 ? Math.round(passMark) : null,
       retryAfterHours: Math.min(Math.max(cmsNumber(v.retryAfterHours, DEFAULT_RETRY_AFTER_HOURS), 0), 24 * 30),

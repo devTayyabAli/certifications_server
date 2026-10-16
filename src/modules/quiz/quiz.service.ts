@@ -126,7 +126,7 @@ export class QuizService {
       quizId: quiz._id,
       moduleSlug: moduleDoc.slug,
       title: quiz.title,
-      isOpen: isQuizOpen(state),
+      isOpen: isQuizOpen(state, moduleDoc.quizOpen),
       sessionState: state,
       maxAttempts: quiz.maxAttempts,
       passingScore: quiz.passingScore,
@@ -158,7 +158,7 @@ export class QuizService {
 
     const moduleDoc = await findPublishedModule(moduleSlugOrId);
     const quiz = await loadQuiz(moduleDoc);
-    if (!isQuizOpen(sessionState(moduleDoc))) {
+    if (!isQuizOpen(sessionState(moduleDoc), moduleDoc.quizOpen)) {
       throw ApiError.forbidden("This quiz opens after the live session.");
     }
 
@@ -270,7 +270,7 @@ export class QuizService {
     await OnboardService.assertPart1Complete(userId);
     const moduleDoc = await findPublishedModule(moduleSlugOrId);
     const quiz = await loadQuiz(moduleDoc);
-    if (!isQuizOpen(sessionState(moduleDoc))) {
+    if (!isQuizOpen(sessionState(moduleDoc), moduleDoc.quizOpen)) {
       throw ApiError.forbidden("This quiz opens after the live session.");
     }
 

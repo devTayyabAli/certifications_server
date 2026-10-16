@@ -55,7 +55,7 @@ async function main() {
     if (m.unlocksCertificate) certificateModules += 1;
 
     console.log(`\n${m.dateLabel} — ${m.title}  (/module/${m.slug})`);
-    console.log(`  session:  ${m.startsAt ? m.startsAt.toISOString() : "no date"} · ${state}${isQuizOpen(state) ? " · quiz open" : ""}`);
+    console.log(`  session:  ${m.startsAt ? m.startsAt.toISOString() : "no date"} · ${state}${isQuizOpen(state, m.open) ? " · quiz open" : " · quiz closed"}${m.open === null ? "" : ` (Open = ${m.open ? "Yes" : "No"})`}`);
     console.log(`  media:    thumbnail ${m.thumbnailUrl ? "✓" : "—"} · banner ${m.bannerUrl ? "✓" : "—"} · recording ${m.videoUrl ? "✓" : "—"} · ${m.chapters.length} chapter(s)`);
     console.log(`  speakers: ${speakers.map((s) => s.name).join(", ") || "none matched"}`);
     console.log(`  quiz:     ${questions.length} question(s) · ${m.quizAttempts} attempts · pass mark ${m.passMark ?? questions.length}`);
