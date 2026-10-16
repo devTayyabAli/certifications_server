@@ -60,7 +60,8 @@ function isOutOfAttempts(attempts: IQuizAttempt[], quiz: IQuiz) {
 }
 
 function hintFor(q: IQuizQuestion | undefined) {
-  return q?.hintTimestamp ? { timestamp: q.hintTimestamp, title: q.hintTitle || "" } : null;
+  // where in the recording to look: a moment, or a stretch when the CMS gives a range
+  return q?.hintTimestamp ? { timestamp: q.hintTimestamp, end: q.hintEnd ?? null, title: q.hintTitle || "" } : null;
 }
 
 /** What the learner sees for each answer they've locked in. */

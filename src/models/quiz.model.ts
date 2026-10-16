@@ -9,7 +9,10 @@ export interface IQuizQuestion {
   }[];
   correctOption: "A" | "B" | "C" | "D";
   explanation: string;
+  /** where in the recording the answer is (start) */
   hintTimestamp?: string;
+  /** end of that stretch, when the CMS gives a range */
+  hintEnd?: string;
   hintTitle?: string;
 }
 
@@ -79,6 +82,7 @@ const quizSchema = new Schema<IQuiz>(
         correctOption: { type: String, enum: ["A", "B", "C", "D"], required: true },
         explanation: { type: String, default: "" },
         hintTimestamp: { type: String },
+        hintEnd: { type: String },
         hintTitle: { type: String },
       },
     ],

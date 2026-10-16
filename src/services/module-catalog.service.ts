@@ -75,6 +75,7 @@ function quizFields(m: CmsModule, questions: CmsQuizQuestion[]) {
       correctOption: q.correct,
       explanation: q.explanation,
       hintTimestamp: q.hintTimestamp ?? undefined,
+      hintEnd: q.hintEnd ?? undefined,
       hintTitle: q.hintTitle || undefined,
     })),
   };

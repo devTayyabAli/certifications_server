@@ -163,8 +163,34 @@ export interface CmsQuizQuestion {
   options: { key: OptionKey; text: string }[];
   correct: OptionKey;
   explanation: string;
+  /** where in the recording the answer is: the start, e.g. "1:00" */
   hintTimestamp: string | null;
+  /** the end of that stretch when the CMS gives a range ("01:00 - 02:00"), e.g. "2:00" */
+  hintEnd: string | null;
   hintTitle: string;
+}
+
+const CLOCK = /^(\d{1,2}):([0-5]\d)(?::([0-5]\d))?$/;
+const seconds = (m: RegExpMatchArray) =>
+  m[3] !== undefined ? Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]) : Number(m[1]) * 60 + Number(m[2]);
+
+/**
+ * The Hint Timestamp field: one moment ("3:15", "1:02:30") or a range
+ * ("01:00 - 02:00", "1:00–2:00", "1:00 to 2:00"). Returns the times as written
+ * (trimmed), or null when it can't be read. A range whose end isn't after its
+ * start keeps only the start.
+ */
+export function parseHintRange(value: string | undefined): { start: string; end: string | null } | null {
+  const text = (value ?? "").trim();
+  if (!text) return null;
+  const [a, b, ...rest] = text.split(/\s*(?:-|–|—|to)\s*/i);
+  if (rest.length > 0) return null;
+  const from = a?.match(CLOCK);
+  if (!from) return null;
+  if (b === undefined) return { start: a, end: null };
+  const to = b.match(CLOCK);
+  if (!to) return null;
+  return { start: a, end: seconds(to) > seconds(from) ? b : null };
 }
 
 export interface CmsModuleCatalog {
@@ -435,6 +461,12 @@ async function load(): Promise<CmsModuleCatalog | null> {
       );
       return null;
     }
+    const hint = parseHintRange(v.hintTimestamp);
+    if (v.hintTimestamp?.trim() && !hint) {
+      warnings.push(
+        `Week ${week} question "${v.question.slice(0, 40)}…": couldn't read Hint Timestamp "${v.hintTimestamp}" (use e.g. 3:15 or 01:00 - 02:00).`
+      );
+    }
     return {
       week,
       order,
@@ -442,7 +474,8 @@ async function load(): Promise<CmsModuleCatalog | null> {
       options,
       correct,
       explanation: v.explanation ?? "",
-      hintTimestamp: /^\d{1,2}:\d{2}(:\d{2})?$/.test(v.hintTimestamp ?? "") ? v.hintTimestamp! : null,
+      hintTimestamp: hint?.start ?? null,
+      hintEnd: hint?.end ?? null,
       hintTitle: v.hintTitle ?? "",
     };
   };
