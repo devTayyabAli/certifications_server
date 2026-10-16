@@ -193,7 +193,7 @@ export class ModuleCatalogService {
     if (section && section.length > 0) {
       // a speaker with a module (Week / sub-section) shows only on that module;
       // name matching is just for speakers that don't say which module they're for
-      const own = section.filter((s) => (s.week !== null ? s.week === m.week : names.includes(normalize(s.name))));
+      const own = section.filter((s) => (s.weeks.length > 0 ? s.weeks.includes(m.week) : names.includes(normalize(s.name))));
       if (own.length > 0) return own;
     }
 

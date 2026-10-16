@@ -9,8 +9,9 @@ import { CmsRecord, CmsTableDef, cmsBoolean, readCmsTable, readPageSubsections }
  * only ever show on its own module.
  *
  * A `speakers` list directly on the section also works: each speaker belongs
- * to the module in its `week` field, or (with no week) to modules naming them
- * in their own Speakers field. Modules with nobody here fall back to the
+ * to the module(s) in its `week` field (one week, or several like "1, 3, 5";
+ * there is also an optional `weeks` field for when Week is a number field), or,
+ * with no week, to modules naming them in their own Speakers field. Modules with nobody here fall back to the
  * shared "SI<3> Speakers" table.
  */
 export const MODULE_SPEAKERS: CmsTableDef = {
@@ -25,8 +26,10 @@ export const MODULE_SPEAKERS: CmsTableDef = {
   fields: [
     { key: "name", columnId: "col-spk-name", name: "Name", type: "string" },
     { key: "week", columnId: "col-spk-week", name: "Week", type: "string", aliases: ["Module Week", "Module"] },
+    { key: "weeks", columnId: "col-spk-weeks", name: "Weeks", type: "string", aliases: ["Other Weeks", "More Weeks", "Also Weeks", "Sessions"] },
     { key: "title", columnId: "col-spk-title", name: "Title", type: "string", aliases: ["Role", "Job Title"] },
     { key: "company", columnId: "col-spk-company", name: "Company", type: "string", aliases: ["Organization", "Organisation"] },
+    { key: "logo", columnId: "col-spk-logo", name: "Company Logo", type: "image", aliases: ["Logo", "CompanyLogo"] },
     { key: "photo", columnId: "col-spk-photo", name: "Photo", type: "image", aliases: ["Headshot", "Image", "Picture"] },
     { key: "bio", columnId: "col-spk-bio", name: "Bio", type: "text" },
     { key: "linkedin", columnId: "col-spk-linkedin", name: "LinkedIn", type: "url" },
@@ -38,8 +41,8 @@ export const MODULE_SPEAKERS: CmsTableDef = {
 };
 
 export interface ModuleSpeaker extends CmsSpeaker {
-  /** the module this speaker presents, when set in the CMS */
-  week: number | null;
+  /** the modules (by week) this speaker presents; empty when the CMS doesn't say */
+  weeks: number[];
 }
 
 /** Links shown to learners: http(s) only; a bare handle like "@kara" becomes its profile link. */
@@ -64,19 +67,26 @@ function weekOf(value: string | undefined): number | null {
   return digits ? Number(digits) : null;
 }
 
+/** Every week in "1", "1, 3, 5" or "Week 2 & Week 4", in order, without repeats. */
+function weeksOf(...values: (string | undefined)[]): number[] {
+  const all = values.flatMap((v) => (v ?? "").match(/\d+/g) ?? []).map(Number);
+  return [...new Set(all)];
+}
+
 /** One CMS speaker item → a speaker card for `week`; null when it has no name or is switched off. */
-function toSpeaker(r: CmsRecord, week: number | null): ModuleSpeaker | null {
+function toSpeaker(r: CmsRecord, weeks: number[]): ModuleSpeaker | null {
   const v = r.values;
   if (!v.name?.trim() || !cmsBoolean(v.active, true)) return null;
   const company = v.company?.trim() ?? "";
   return {
     id: r.rowId,
     name: v.name.trim(),
-    week,
+    weeks,
     role: v.title?.trim() ?? "",
     companyName: company,
     companyTag: company,
     headshotUrl: image(v.photo),
+    companyLogoUrl: image(v.logo),
     bio: v.bio?.trim() || undefined,
     telegramHandle: v.telegram?.trim().replace(/^@/, "").replace(/^https?:\/\/t\.me\//i, "") || undefined,
     links: {
@@ -105,9 +115,9 @@ export class CmsModuleSpeakersService {
           console.warn(`⚠️ Speakers sub-section "${g.title}" skipped — name it "Week N · Module title".`);
           return [];
         }
-        return g.rows.map((r) => toSpeaker(r, week)).filter((s): s is ModuleSpeaker => s !== null);
+        return g.rows.map((r) => toSpeaker(r, [week])).filter((s): s is ModuleSpeaker => s !== null);
       });
-      const fromList = (rows ?? []).map((r) => toSpeaker(r, weekOf(r.values.week))).filter((s): s is ModuleSpeaker => s !== null);
+      const fromList = (rows ?? []).map((r) => toSpeaker(r, weeksOf(r.values.week, r.values.weeks))).filter((s): s is ModuleSpeaker => s !== null);
       value = rows === null && groups === null ? null : [...fromGroups, ...fromList];
     } catch (err) {
       console.warn("⚠️ Could not load speakers from SI3 CMS:", (err as Error).message);
