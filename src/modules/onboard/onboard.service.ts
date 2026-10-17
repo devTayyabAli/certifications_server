@@ -231,10 +231,13 @@ export class OnboardService {
   }
 
   /**
-   * Part 2 opens once every session is done: each published module with a
-   * quiz has been completed (its quiz passed, or skipped after every attempt).
+   * Part 2 opens once the team switches it on in the CMS ("Onboarding Part 2"
+   * → Open) and every session is done: each published module with a quiz has
+   * been completed (its quiz passed, or skipped after every attempt).
    */
   static async isPart2Unlocked(userId: Types.ObjectId) {
+    // closed for everyone until the team switches it on in the CMS
+    if (!(await CmsPart2Service.getContent()).open) return false;
     const [modules, progress] = await Promise.all([
       Module.find({ isPublished: true }, { _id: 1 }),
       UserProgress.findOne({ user: userId }, { completedModules: 1 }),

@@ -16,6 +16,8 @@ export const PART2_SECTION: CmsTableDef = {
   fields: [
     { key: "title", columnId: "col-p2-title", name: "Title", type: "string" },
     { key: "subtitle", columnId: "col-p2-subtitle", name: "Subtitle", type: "text" },
+    // the team's switch: Part 2 stays closed for everyone until this is on
+    { key: "open", columnId: "col-p2-open", name: "Open", type: "string", aliases: ["Is Open", "Part 2 Open"] },
   ],
 };
 
@@ -43,12 +45,15 @@ export interface Part2Question {
 }
 
 export interface Part2Content {
+  /** switched on by the team in the CMS; off (or missing) keeps Part 2 closed */
+  open: boolean;
   title: string;
   subtitle: string;
   questions: Part2Question[];
 }
 
 const DEFAULT_CONTENT: Part2Content = {
+  open: false,
   title: "Close out your cohort",
   subtitle:
     "Before you mint your certificate, take a few minutes to look back on the cohort and tell us where you’re heading next. Write as much or as little as you like.",
@@ -80,6 +85,7 @@ export class CmsPart2Service {
           required: cmsBoolean(r.values.required, true),
         }));
       value = {
+        open: cmsBoolean(h.open, false),
         title: h.title?.trim() || DEFAULT_CONTENT.title,
         subtitle: h.subtitle?.trim() || DEFAULT_CONTENT.subtitle,
         // the list, once set up, is the source; until then the default questions
