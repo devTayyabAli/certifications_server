@@ -173,8 +173,8 @@ export class OnboardService {
 
   /**
    * Final Part 1 submission. Checked against what is published in the CMS:
-   * every required account followed, every required question answered, and
-   * no answer over its limit. Onboarding awards no badge.
+   * every required question answered and no answer over its limit (following
+   * the socials is optional). Onboarding awards no badge.
    */
   static async submitPart1(userId: Types.ObjectId, input: Part1SubmitInput) {
     const content = await requirePart1Content();
@@ -184,8 +184,8 @@ export class OnboardService {
       throw ApiError.conflict("You've already submitted Si Her Onboard – Part 1.");
     }
 
+    // following the socials is encouraged but optional: it's recorded, never required
     const { answers, follows } = mergeProgress(content, survey, input);
-    const followedIds = new Set(follows.map((f) => f.socialId));
 
     // Belt and braces: an onboarding with no questions can't be submitted
     if (content.questions.length === 0) {
@@ -196,9 +196,6 @@ export class OnboardService {
     }
 
     const errors = [
-      ...content.socials
-        .filter((s) => s.required && !followedIds.has(s.id))
-        .map((s) => ({ field: s.id, message: `Please follow ${s.label} first.` })),
       ...content.questions
         .filter((q) => q.required && !(answers[q.id] ?? "").trim())
         .map((q) => ({ field: q.id, message: "This question needs an answer." })),
