@@ -39,6 +39,14 @@ export const ONBOARDING_TABLE: CmsTableDef = {
       aliases: ["Video URL", "Intro Video Link", "Video Link"],
     },
     { key: "videoPoster", columnId: "col-ob-video-poster", name: "Intro Video Poster", type: "image", aliases: ["Video Poster"] },
+    { key: "videoTitle", columnId: "col-ob-video-title", name: "Video Title", type: "string", aliases: ["Intro Video Title"] },
+    {
+      key: "videoDescription",
+      columnId: "col-ob-video-desc",
+      name: "Video Description",
+      type: "text",
+      aliases: ["Intro Video Description"],
+    },
     { key: "videoCaption", columnId: "col-ob-video-caption", name: "Video Caption", type: "string" },
     { key: "videoMinutes", columnId: "col-ob-video-minutes", name: "Video Length (minutes)", type: "number" },
     { key: "questionsMinutes", columnId: "col-ob-questions-minutes", name: "Questions Time (minutes)", type: "number" },
@@ -126,7 +134,14 @@ export interface OnboardingContent {
   stepLabel: string;
   card: { title: string; description: string; imageUrl: string | null; doneMessage: string };
   page: { title: string; subtitle: string };
-  video: { url: string | null; posterUrl: string | null; caption: string; minutes: number | null };
+  video: {
+    url: string | null;
+    posterUrl: string | null;
+    title: string;
+    description: string;
+    caption: string;
+    minutes: number | null;
+  };
   questionsMinutes: number | null;
   tasks: { video: string; socials: string; questions: string };
   socialsHeading: string;
@@ -245,6 +260,8 @@ async function loadAll(): Promise<Map<OnboardPart, OnboardingContent | null>> {
       video: {
         url: safeUrl(v.videoUrl),
         posterUrl: safeUrl(v.videoPoster, { allowRelative: true }),
+        title: v.videoTitle ?? "",
+        description: v.videoDescription ?? "",
         caption: v.videoCaption ?? "",
         minutes: optionalNumber(v.videoMinutes),
       },
