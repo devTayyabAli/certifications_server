@@ -86,6 +86,16 @@ export const MODULES_TABLE: CmsTableDef = {
     { key: "badgeName", columnId: "col-mod-badge", name: "Badge Name", type: "string" },
     { key: "badgeImage", columnId: "col-mod-badge-img", name: "Badge Image", type: "image" },
     { key: "unlocksCertificate", columnId: "col-mod-cert", name: "Unlocks Certificate", type: "string", defaultValue: "false" },
+    // badge sharing on the Achievements page: the partner's handles to tag, and optional own wording
+    { key: "xHandles", columnId: "col-mod-x-handles", name: "X Handles", type: "string", aliases: ["Partner X", "Twitter Handles"] },
+    {
+      key: "linkedinHandles",
+      columnId: "col-mod-li-handles",
+      name: "LinkedIn Handles",
+      type: "string",
+      aliases: ["Partner LinkedIn", "LinkedIn Tags"],
+    },
+    { key: "shareText", columnId: "col-mod-share", name: "Share Text", type: "text" },
     // the module's own quiz, written right under it (see parseQuizText)
     { key: "quiz", columnId: "col-mod-quiz", name: "Quiz", type: "text", aliases: ["Quiz Questions", "Questions"] },
     {
@@ -160,6 +170,8 @@ export interface CmsModule {
   unlocksCertificate: boolean;
   /** "Open" field: true/false set by the team; null (blank) = opens when the recording is up */
   open: boolean | null;
+  /** sharing the module's badge: handles to tag, and the team's own wording (may use {badge} {title} {week} {handles} {link}) */
+  share: { x: string; linkedin: string; text: string };
   quizAttempts: number;
   /** null = every question must be correct */
   passMark: number | null;
@@ -531,6 +543,7 @@ async function load(): Promise<CmsModuleCatalog | null> {
       badgeImage: safeUrl(v.badgeImage, { allowRelative: true }) ?? DEFAULT_BADGE_IMAGE,
       unlocksCertificate: cmsBoolean(v.unlocksCertificate, false),
       open: v.open?.trim() ? cmsBoolean(v.open, false) : null,
+      share: { x: v.xHandles?.trim() ?? "", linkedin: v.linkedinHandles?.trim() ?? "", text: v.shareText?.trim() ?? "" },
       quizAttempts: Math.min(Math.max(Math.round(cmsNumber(v.quizAttempts, 3)), 1), 10),
       passMark: Number.isFinite(passMark) && passMark > 0 ? Math.round(passMark) : null,
       retryAfterHours: Math.min(Math.max(cmsNumber(v.retryAfterHours, DEFAULT_RETRY_AFTER_HOURS), 0), 24 * 30),

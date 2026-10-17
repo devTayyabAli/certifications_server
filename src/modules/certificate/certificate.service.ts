@@ -9,7 +9,8 @@ import { IUserProgress, UserProgress } from "../../models/progress.model";
 import { Quiz } from "../../models/quiz.model";
 import { Settings } from "../../models/settings.model";
 import { User } from "../../models/user.model";
-import { CmsCertificateService } from "../../services/cms-certificate.service";
+import { CertificateContent, CmsCertificateService } from "../../services/cms-certificate.service";
+import { CmsModule, CmsModulesService } from "../../services/cms-modules.service";
 import { ModuleCatalogService, isQuizOpen, sessionState } from "../../services/module-catalog.service";
 import { isAddress } from "ethers";
 import { ApiError } from "../../utils/api-error";
@@ -64,6 +65,50 @@ async function earnedBadges(progress: IUserProgress | null) {
       };
     })
     .sort((a, b) => (a.week ?? 99) - (b.week ?? 99));
+}
+
+const joinText = (...parts: (string | undefined)[]) => parts.map((p) => p?.trim()).filter(Boolean).join(" ");
+
+/**
+ * Ready-made posts for sharing one module badge on LinkedIn and X: they tag the
+ * module's partner (its "X Handles" / "LinkedIn Handles" in the CMS) and the
+ * cohort's own handles, so every share reaches the partner's audience too.
+ * A module's own "Share Text" can replace the wording, using {badge} {title}
+ * {week} {partner} {handles} {link}.
+ */
+function badgeShare(
+  badge: { name: string; week: number | null; moduleTitle: string | null },
+  module: CmsModule | undefined,
+  content: CertificateContent,
+  link: string | null
+) {
+  const title = badge.moduleTitle ?? module?.title ?? "";
+  const partner = module?.partner && module.partner !== "Si Her DeFi" ? module.partner : "";
+  const handles = {
+    x: joinText(module?.share.x, content.shareXHandles),
+    linkedin: joinText(module?.share.linkedin, content.shareLinkedinHandles),
+  };
+  const compose = (platform: "x" | "linkedin") => {
+    const custom = module?.share.text;
+    if (custom) {
+      const filled = custom
+        .replace(/\{badge\}/gi, badge.name)
+        .replace(/\{title\}/gi, title)
+        .replace(/\{week\}/gi, badge.week ? String(badge.week) : "")
+        .replace(/\{partner\}/gi, partner)
+        .replace(/\{link\}/gi, link ?? "");
+      return /\{handles\}/i.test(filled)
+        ? filled.replace(/\{handles\}/gi, handles[platform])
+        : joinText(filled, handles[platform], content.shareHashtags);
+    }
+    const what = `I just earned the "${badge.name}" badge in Si Her DeFi${badge.week ? `, Week ${badge.week}` : ""}: ${title}${
+      partner ? ` with ${partner}` : ""
+    }! 🎉`;
+    return platform === "x"
+      ? joinText(what, handles.x, content.shareHashtags, link ?? undefined)
+      : `${joinText(what, handles.linkedin)}\n\n${joinText(content.shareHashtags)}${link ? `\n${link}` : ""}`.trim();
+  };
+  return { x: compose("x"), linkedin: compose("linkedin") };
 }
 
 /**
@@ -213,13 +258,20 @@ export class CertificateService {
         console.warn("⚠️ Could not read the wallet's badges on-chain:", (err as Error).message);
       }
     }
+    // badges and certificate are claimed together, at the end of the cohort
     const claimable = held
       ? {
           moduleIds: [...new Set(earnedWeeks)].filter((w) => !held!.has(w)).sort((a, b) => a - b),
-          // the certificate itself only once every module is done
           capstone: cert.status === "unlocked" && allModulesDone && !held.has(CAPSTONE_TOKEN_ID),
         }
       : null;
+    // one post per badge, for LinkedIn and X
+    const catalog = await CmsModulesService.getCatalog().catch(() => null);
+    const shareLink = cert.status === "locked" ? null : verifyUrl(cert.verificationCode);
+    const sharedBadges = badges.map((b) => ({
+      ...b,
+      share: badgeShare(b, catalog?.modules.find((m) => m.week === b.week), content, shareLink),
+    }));
     const claimPending =
       cert.mint?.state === "pending" && Date.now() - new Date(cert.mint.startedAt).getTime() < STALE_CLAIM_MS;
 
@@ -232,7 +284,7 @@ export class CertificateService {
       verifyUrl: cert.status === "locked" ? null : verifyUrl(cert.verificationCode),
       unlockModule: prerequisite ? { week: prerequisite.week, title: prerequisite.title, slug: prerequisite.slug } : null,
       content,
-      badges,
+      badges: sharedBadges,
       totalBadges: COHORT_BADGE_TOTAL,
       stillOpen,
       // the certificate can be claimed on-chain only when every module is done
@@ -244,6 +296,7 @@ export class CertificateService {
       // true when the learner can claim something now from their own wallet
       canMint:
         claimsEnabled() &&
+        allModulesDone &&
         !!wallet &&
         !claimPending &&
         !!claimable &&
@@ -309,11 +362,14 @@ export class CertificateService {
       throw ApiError.conflict("Your last claim is still confirming. Please wait a moment.");
     }
 
+    // badges and certificate are claimed together, once the cohort is complete
+    if ((await modulesLeft(progress)).length > 0) {
+      throw ApiError.forbidden("Your certificate and badges can be claimed once you've completed every module.");
+    }
     const weeks = (await earnedBadges(progress)).map((b) => b.week).filter((w): w is number => w !== null);
     let voucher;
     try {
-      const allDone = (await modulesLeft(progress)).length === 0;
-      voucher = await buildVoucher(wallet, weeks, cert.status === "unlocked" && allDone);
+      voucher = await buildVoucher(wallet, weeks, cert.status === "unlocked");
     } catch (err) {
       console.error("❌ Could not prepare a claim voucher:", (err as Error).message);
       throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, `${badgeErrorMessage(err)} Please try again in a moment.`);

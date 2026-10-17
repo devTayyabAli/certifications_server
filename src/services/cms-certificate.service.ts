@@ -11,6 +11,9 @@ export const CERTIFICATE_SECTION: CmsTableDef = {
   description: "Wording on the learner certificate, its public verification page and LinkedIn.",
   page: { section: "Certificate" },
   fields: [
+    // the certificate page's own heading, and the line under it (else "cohort · dates · program")
+    { key: "pageTitle", columnId: "col-cert-page-title", name: "Page Title", type: "string" },
+    { key: "pageSubtitle", columnId: "col-cert-page-subtitle", name: "Page Subtitle", type: "string" },
     { key: "programName", columnId: "col-cert-program", name: "Program Name", type: "string" },
     { key: "cohortLabel", columnId: "col-cert-cohort", name: "Cohort Label", type: "string" },
     { key: "cohortDates", columnId: "col-cert-dates", name: "Cohort Dates", type: "string" },
@@ -23,10 +26,17 @@ export const CERTIFICATE_SECTION: CmsTableDef = {
     { key: "linkedinOrganizationName", columnId: "col-cert-li-org", name: "LinkedIn Organization Name", type: "string" },
     { key: "linkedinOrganizationId", columnId: "col-cert-li-org-id", name: "LinkedIn Organization ID", type: "string" },
     { key: "shareText", columnId: "col-cert-share", name: "Share Text", type: "text" },
+    // tagged in every badge post, after the module's own partner handles
+    { key: "shareXHandles", columnId: "col-cert-share-x", name: "Share X Handles", type: "string" },
+    { key: "shareLinkedinHandles", columnId: "col-cert-share-li", name: "Share LinkedIn Handles", type: "string" },
+    { key: "shareHashtags", columnId: "col-cert-share-tags", name: "Share Hashtags", type: "string" },
   ],
 };
 
 export interface CertificateContent {
+  pageTitle: string;
+  /** empty = "cohort label · cohort dates · program name" */
+  pageSubtitle: string;
   programName: string;
   cohortLabel: string;
   cohortDates: string;
@@ -41,9 +51,14 @@ export interface CertificateContent {
   /** Numeric LinkedIn company id — shows the logo on the learner's profile */
   linkedinOrganizationId: string | null;
   shareText: string;
+  shareXHandles: string;
+  shareLinkedinHandles: string;
+  shareHashtags: string;
 }
 
 const DEFAULTS: CertificateContent = {
+  pageTitle: "Your certificate",
+  pageSubtitle: "",
   programName: "Si Her DeFi",
   cohortLabel: "Cohort 01",
   cohortDates: "Sep 24 – Dec 3 2026",
@@ -57,6 +72,9 @@ const DEFAULTS: CertificateContent = {
   linkedinOrganizationName: "SI<3>",
   linkedinOrganizationId: null,
   shareText: "I earned my Si Her DeFi certificate, verified on Base.",
+  shareXHandles: "",
+  shareLinkedinHandles: "",
+  shareHashtags: "#SiHerDeFi",
 };
 
 const CACHE_TTL_MS = 60 * 1000;
@@ -71,6 +89,8 @@ export class CmsCertificateService {
       const v = rows?.[0]?.values ?? {};
       const pick = (key: keyof CertificateContent) => (v[key]?.trim() ? v[key].trim() : DEFAULTS[key]);
       value = {
+        pageTitle: pick("pageTitle") as string,
+        pageSubtitle: pick("pageSubtitle") as string,
         programName: pick("programName") as string,
         cohortLabel: pick("cohortLabel") as string,
         cohortDates: pick("cohortDates") as string,
@@ -83,6 +103,9 @@ export class CmsCertificateService {
         linkedinOrganizationName: pick("linkedinOrganizationName") as string,
         linkedinOrganizationId: /^\d+$/.test(v.linkedinOrganizationId ?? "") ? v.linkedinOrganizationId : null,
         shareText: pick("shareText") as string,
+        shareXHandles: pick("shareXHandles") as string,
+        shareLinkedinHandles: pick("shareLinkedinHandles") as string,
+        shareHashtags: pick("shareHashtags") as string,
       };
     } catch (err) {
       console.warn("⚠️ Could not load certificate wording from SI3 CMS:", (err as Error).message);
