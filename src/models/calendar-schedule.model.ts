@@ -10,6 +10,23 @@ export interface ICalendarSchedule extends Document {
   endDate?: Date;
   timezone?: string;
   status: "scheduled" | "cancelled" | "attended";
+  /**
+   * An emailed calendar invite (see CalendarInviteService): who it went to and
+   * the session as last sent, so a later change to the session sends an update.
+   */
+  invite?: {
+    email: string;
+    sequence: number;
+    sentAt: Date;
+    start: Date;
+    end: Date;
+    link: string;
+    title: string;
+    /** set once a cancellation has been sent */
+    cancelledAt?: Date | null;
+    /** the last send failure, retried on the next pass */
+    error?: string | null;
+  } | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -53,6 +70,23 @@ const calendarScheduleSchema = new Schema<ICalendarSchedule>(
       type: String,
       enum: ["scheduled", "cancelled", "attended"],
       default: "scheduled",
+    },
+    invite: {
+      type: new Schema(
+        {
+          email: { type: String, required: true },
+          sequence: { type: Number, default: 0 },
+          sentAt: { type: Date, required: true },
+          start: { type: Date, required: true },
+          end: { type: Date, required: true },
+          link: { type: String, default: "" },
+          title: { type: String, default: "" },
+          cancelledAt: { type: Date, default: null },
+          error: { type: String, default: null },
+        },
+        { _id: false }
+      ),
+      default: null,
     },
   },
   {

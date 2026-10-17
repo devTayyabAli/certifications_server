@@ -16,6 +16,9 @@ import {
 import { ApiError } from "../../utils/api-error";
 import { generateGoogleCalendarUrl, generateIcsContent } from "../../utils/calendar-generator";
 import { generateVerificationCode } from "../../utils/crypto";
+import { calendarEvent, isTimeZone } from "../../utils/module-calendar";
+import { CalendarInviteService, invitesEnabled } from "../../services/calendar-invite.service";
+import { HttpStatus } from "../../constants/http-status";
 
 /** Looks a published module up by slug or id. */
 export async function findPublishedModule(slugOrId: string) {
@@ -132,38 +135,13 @@ async function toModuleItem(
   };
 }
 
-/** A real IANA time zone name the runtime knows ("Asia/Karachi"), not arbitrary text. */
-function isTimeZone(value: unknown): value is string {
-  if (typeof value !== "string" || value.length > 64) return false;
-  try {
-    new Intl.DateTimeFormat("en-US", { timeZone: value });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export function calendarEvent(moduleDoc: IModule) {
-  const startDate = moduleDoc.scheduledDate;
-  if (!startDate) throw ApiError.badRequest("This session doesn't have a date yet.");
-  const endDate = moduleDoc.endDate || new Date(startDate.getTime() + 60 * 60 * 1000);
-  return {
-    uid: `module-${moduleDoc._id}@siherdefi.org`,
-    title: moduleDoc.calendarTitle || `Si Her DeFi: ${moduleDoc.title}`,
-    description:
-      moduleDoc.calendarDescription ||
-      `${moduleDoc.description}${moduleDoc.presenter ? `\n\nPresented by: ${moduleDoc.presenter}` : ""}`,
-    location: moduleDoc.location || "Si Her DeFi Virtual Stage",
-    startDate,
-    endDate,
-    // The live link when there is one, otherwise the module's own page
-    url: moduleDoc.meetingLink || `${env.FRONTEND_URL.replace(/\/+$/, "")}/module/${moduleDoc.slug}`,
-  };
-}
+export { calendarEvent };
 
 export class ModuleService {
   static async getAllModules(userId: Types.ObjectId) {
     await ModuleCatalogService.ensureSynced();
+    // sessions changed in the CMS: send the updated invites (at most once a minute)
+    await CalendarInviteService.syncInvites();
     const modules = await Module.find({ isPublished: true }).sort({ week: 1, order: 1 });
     const [progress, schedules, quizzes] = await Promise.all([
       UserProgress.findOne({ user: userId }),
@@ -273,8 +251,25 @@ export class ModuleService {
     };
   }
 
+  /** Emails the learner a calendar invite for the session (updates follow automatically). */
+  static async inviteModuleSession(slugOrId: string, userId: Types.ObjectId, timezone?: string) {
+    if (!invitesEnabled()) throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, "Email invites aren't available right now.");
+    const moduleDoc = await findPublishedModule(slugOrId);
+    try {
+      const { email, resent } = await CalendarInviteService.invite(moduleDoc, userId, timezone);
+      return { success: true, slug: moduleDoc.slug, calendarType: "email" as const, sentTo: email, resent };
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      console.error("❌ Calendar invite failed:", (err as Error).message);
+      throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, "We couldn't send the invite just now. Please try again in a moment.");
+    }
+  }
+
   static async unscheduleModuleSession(slugOrId: string, userId: Types.ObjectId) {
     const moduleDoc = await findPublishedModule(slugOrId);
+    // an emailed invite is taken out of the learner's calendar too
+    const existing = await CalendarSchedule.findOne({ user: userId, module: moduleDoc._id });
+    if (existing) await CalendarInviteService.cancelFor(existing, moduleDoc);
     await CalendarSchedule.findOneAndDelete({ user: userId, module: moduleDoc._id });
     return {
       success: true,

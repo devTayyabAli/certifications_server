@@ -293,6 +293,60 @@ export function generateIcsContent(event: CalendarEventPayload): string {
   return lines.map((l) => foldIcsLine(l)).join("\r\n");
 }
 
+export interface InviteOptions {
+  /** REQUEST = a new or updated invite; CANCEL = remove it from the attendee's calendar */
+  method: "REQUEST" | "CANCEL";
+  /** goes up by one with every update, so calendars replace the older version */
+  sequence: number;
+  organizer: { name: string; email: string };
+  attendee: { name?: string; email: string };
+}
+
+/**
+ * A calendar invite (iTIP, RFC 5546) sent by email: Gmail, Outlook, Apple and
+ * Proton show it with Accept / Decline and put it in the attendee's calendar.
+ * Updates reuse the UID with a higher SEQUENCE, so they change the event in
+ * place; a CANCEL removes it.
+ */
+export function generateInviteIcs(event: CalendarEventPayload, opts: InviteOptions): string {
+  const start = parseValidDate(event.startDate);
+  const end = event.endDate ? parseValidDate(event.endDate) : new Date(start.getTime() + 60 * 60 * 1000);
+  const url = sanitizeCalendarUrl(event.url);
+  const description = escapeIcsText(
+    (event.description || "Si Her DeFi Cohort Learning Session") + (url ? `\n\nJoin: ${url}` : "")
+  );
+  const cancel = opts.method === "CANCEL";
+  const cn = (s: string) => s.replace(/[";:,\r\n]/g, " ").trim();
+
+  const lines = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//Si Her DeFi//Session Invites//EN",
+    "CALSCALE:GREGORIAN",
+    `METHOD:${opts.method}`,
+    "BEGIN:VEVENT",
+    `UID:${event.uid}`,
+    `SEQUENCE:${opts.sequence}`,
+    `DTSTAMP:${formatCalendarUtcDate(new Date())}`,
+    `DTSTART:${formatCalendarUtcDate(start)}`,
+    `DTEND:${formatCalendarUtcDate(end)}`,
+    `SUMMARY:${escapeIcsText(event.title)}`,
+    `DESCRIPTION:${description}`,
+    `LOCATION:${escapeIcsText(url ?? event.location ?? "Si Her DeFi Virtual Stage")}`,
+    ...(url ? [`URL:${url}`] : []),
+    `ORGANIZER;CN=${cn(opts.organizer.name)}:mailto:${opts.organizer.email}`,
+    `ATTENDEE;CN=${cn(opts.attendee.name || opts.attendee.email)};ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:${opts.attendee.email}`,
+    `STATUS:${cancel ? "CANCELLED" : "CONFIRMED"}`,
+    "TRANSP:OPAQUE",
+    ...(cancel
+      ? []
+      : ["BEGIN:VALARM", "TRIGGER:-PT15M", "ACTION:DISPLAY", `DESCRIPTION:Reminder: ${escapeIcsText(event.title)}`, "END:VALARM"]),
+    "END:VEVENT",
+    "END:VCALENDAR",
+  ];
+  return lines.map((l) => foldIcsLine(l)).join("\r\n");
+}
+
 /**
  * A calendar learners subscribe to by URL (Google, Apple, Proton, Outlook): every
  * session in one feed. Each event keeps its UID, so a changed time or link

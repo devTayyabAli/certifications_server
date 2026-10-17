@@ -34,6 +34,21 @@ function attemptsFor(progress: IUserProgress | null, quiz: IQuiz) {
   return allAttemptsFor(progress, quiz).filter((a) => !a.archived);
 }
 
+/**
+ * Questions already answered correctly in this set of attempts. A retake only
+ * asks the ones still wrong: a right answer carries over to the next attempt.
+ * Starting over (a fresh set) asks every question again.
+ */
+function solvedInRound(attempts: IQuizAttempt[], quiz: IQuiz) {
+  const inQuiz = new Set(quiz.questions.map((q) => q.questionNumber));
+  const solved = new Set<number>();
+  for (const a of attempts) {
+    if (!isCompletedAttempt(a)) continue;
+    for (const ans of a.answers) if (ans.isCorrect && inQuiz.has(ans.questionNumber)) solved.add(ans.questionNumber);
+  }
+  return solved;
+}
+
 function isSkipped(progress: IUserProgress | null, quiz: IQuiz) {
   return (progress?.skippedQuizzes ?? []).some((s) => s.quiz.toString() === quiz._id.toString());
 }
@@ -79,9 +94,12 @@ function answerFeedback(quiz: IQuiz, answer: IQuizAttempt["answers"][number]) {
 function attemptResult(
   quiz: IQuiz,
   attempt: IQuizAttempt,
-  round: { remaining: number; retryAvailableAt: Date | null }
+  round: { remaining: number; retryAvailableAt: Date | null },
+  /** right so far in this set of attempts: these aren't asked again on a retake */
+  solved: Set<number>
 ) {
   return {
+    solvedQuestions: [...solved].sort((a, b) => a - b),
     attemptNumber: attempt.attemptNumber,
     score: attempt.score,
     totalQuestions: quiz.questions.length,
@@ -121,6 +139,7 @@ export class QuizService {
     const lastCompleted = completed[completed.length - 1] ?? null;
     const round = roundState(attempts, quiz);
     const state = sessionState(moduleDoc);
+    const solved = solvedInRound(attempts, quiz);
 
     return {
       quizId: quiz._id,
@@ -140,16 +159,19 @@ export class QuizService {
       // Skipped after every attempt: no badge, but the module counts as done
       isSkipped: !passedAttempt && isSkipped(progress, quiz),
       badge: { name: quiz.badgeRewardName, image: quiz.badgeRewardImage },
-      // Questions and options only — the correct option never leaves the server
+      // Questions, options and where in the recording to look — the correct option never leaves the server
       questions: quiz.questions.map((q) => ({
         questionNumber: q.questionNumber,
         questionText: q.questionText,
         options: q.options.map((o) => ({ key: o.key, text: o.text })),
+        hint: hintFor(q),
       })),
+      // answered correctly earlier in this set: a retake skips them
+      solvedQuestions: [...solved].sort((a, b) => a - b),
       currentAttempt: open
         ? { attemptNumber: round.usedInRound, answers: open.answers.map((a) => answerFeedback(quiz, a)) }
         : null,
-      lastResult: lastCompleted ? attemptResult(quiz, passedAttempt ?? lastCompleted, round) : null,
+      lastResult: lastCompleted ? attemptResult(quiz, passedAttempt ?? lastCompleted, round, solved) : null,
     };
   }
 
@@ -203,6 +225,11 @@ export class QuizService {
     if (attempt.answers.some((a) => a.questionNumber === input.questionNumber)) {
       throw ApiError.conflict("You've already answered this question in this attempt.");
     }
+    // right in an earlier attempt of this set: it carries over and isn't asked again
+    const solved = solvedInRound(attemptsFor(progress, quiz), quiz);
+    if (solved.has(input.questionNumber)) {
+      throw ApiError.conflict("You already got this question right.");
+    }
 
     const isCorrect = question.correctOption === input.selectedOption;
     attempt.answers.push({
@@ -210,11 +237,14 @@ export class QuizService {
       selectedOption: input.selectedOption,
       isCorrect,
     });
-    attempt.score = attempt.answers.filter((a) => a.isCorrect).length;
+    // the score counts the answers carried over from earlier attempts too
+    const solvedNow = new Set(solved);
+    for (const a of attempt.answers) if (a.isCorrect) solvedNow.add(a.questionNumber);
+    attempt.score = solvedNow.size;
 
-    // Finished once every question currently in the quiz has an answer
+    // Finished once every question not already solved has an answer
     const answered = new Set(attempt.answers.map((a) => a.questionNumber));
-    const isFinished = quiz.questions.every((q) => answered.has(q.questionNumber));
+    const isFinished = quiz.questions.every((q) => solved.has(q.questionNumber) || answered.has(q.questionNumber));
 
     let badgeEarned: { name: string; image: string } | null = null;
     let certificateUnlocked = false;
@@ -253,7 +283,7 @@ export class QuizService {
       totalQuestions: quiz.questions.length,
       result: isFinished
         ? {
-            ...attemptResult(quiz, attempt, round),
+            ...attemptResult(quiz, attempt, round, solvedNow),
             badgeEarned,
             certificateUnlocked,
           }

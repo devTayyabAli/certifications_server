@@ -43,6 +43,17 @@ export class ModuleController {
     });
   });
 
+  /** POST /modules/:id/invite — email the learner a calendar invite for the session */
+  static invite = asyncHandler(async (req: Request, res: Response) => {
+    const userId = req.user!._id;
+    const { id } = req.params;
+    const result = await ModuleService.inviteModuleSession(id, userId, req.body?.timezone);
+    return ApiResponse.success(res, {
+      message: "Calendar invite sent",
+      data: result,
+    });
+  });
+
   static unschedule = asyncHandler(async (req: Request, res: Response) => {
     const userId = req.user!._id;
     const { id } = req.params;

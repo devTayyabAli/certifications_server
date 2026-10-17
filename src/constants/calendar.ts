@@ -1,8 +1,9 @@
 /** Calendars a learner can add a session to from the app. */
-export const CALENDAR_TYPES = ["google", "apple", "outlook", "proton", "other"] as const;
+export const CALENDAR_TYPES = ["google", "apple", "outlook", "proton", "other", "email"] as const;
 export type CalendarType = (typeof CALENDAR_TYPES)[number];
 
 export const CALENDAR_LABELS: Record<CalendarType, string> = {
+  email: "an email invite",
   google: "Google Calendar",
   apple: "Apple Calendar",
   outlook: "Outlook",
