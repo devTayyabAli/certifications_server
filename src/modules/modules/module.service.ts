@@ -7,6 +7,8 @@ import { IModule, Module } from "../../models/module.model";
 import { Profile } from "../../models/profile.model";
 import { IUserProgress, UserProgress } from "../../models/progress.model";
 import { IQuiz, Quiz } from "../../models/quiz.model";
+import { CmsCertificateService } from "../../services/cms-certificate.service";
+import { CmsModulesService } from "../../services/cms-modules.service";
 import { CmsSpeaker, CmsSpeakerService } from "../../services/cms-speaker.service";
 import {
   ModuleCatalogService,
@@ -15,6 +17,7 @@ import {
 } from "../../services/module-catalog.service";
 import { ApiError } from "../../utils/api-error";
 import { generateGoogleCalendarUrl, generateIcsContent } from "../../utils/calendar-generator";
+import { composeBadgeShare } from "../../utils/badge-share";
 import { generateVerificationCode } from "../../utils/crypto";
 import { calendarEvent, isTimeZone } from "../../utils/module-calendar";
 import { CalendarInviteService, invitesEnabled } from "../../services/calendar-invite.service";
@@ -78,6 +81,7 @@ async function toModuleItem(
     quiz?: IQuiz;
     schedule?: ICalendarSchedule | null;
     withSpeakers?: boolean;
+    share?: { x: string; linkedin: string } | null;
   }
 ) {
   const state = sessionState(m);
@@ -132,7 +136,37 @@ async function toModuleItem(
     calendarOutdated,
     addedToCalendarAt: schedule?.updatedAt ?? null,
     speakers,
+    /** the post for this badge, with the CMS wording and the partner tags filled in */
+    share: ctx.share ?? null,
   };
+}
+
+/** One share post per module, from the CMS wording and the partner handles. */
+async function sharesFor(userId: Types.ObjectId, modules: IModule[]) {
+  const [catalog, content, cert] = await Promise.all([
+    CmsModulesService.getCatalog().catch(() => null),
+    CmsCertificateService.getContent(),
+    Certificate.findOne({ user: userId }, { status: 1, verificationCode: 1 }),
+  ]);
+  const link =
+    cert && cert.status !== "locked" && cert.verificationCode
+      ? `${env.FRONTEND_URL.replace(/\/+$/, "")}/credential/${encodeURIComponent(cert.verificationCode)}`
+      : null;
+  const cmsModules = catalog?.modules ?? [];
+  const out = new Map<string, { x: string; linkedin: string }>();
+  for (const m of modules) {
+    const cms = cmsModules.find((c) => c.week === m.week) ?? cmsModules.find((c) => c.slug === m.slug);
+    out.set(
+      m._id.toString(),
+      composeBadgeShare(
+        { name: m.badgeName || `Week ${m.week} badge`, week: m.week, moduleTitle: m.title },
+        cms,
+        content,
+        link
+      )
+    );
+  }
+  return out;
 }
 
 export { calendarEvent };
@@ -150,6 +184,7 @@ export class ModuleService {
     ]);
     const scheduleMap = new Map(schedules.map((s) => [s.module.toString(), s]));
     const quizMap = new Map(quizzes.map((q) => [q.module.toString(), q]));
+    const shares = await sharesFor(userId, modules);
 
     return Promise.all(
       modules.map((m) =>
@@ -158,6 +193,7 @@ export class ModuleService {
           quiz: quizMap.get(m._id.toString()),
           schedule: scheduleMap.get(m._id.toString()) ?? null,
           withSpeakers: true,
+          share: shares.get(m._id.toString()) ?? null,
         })
       )
     );
@@ -165,16 +201,18 @@ export class ModuleService {
 
   static async getModuleBySlugOrId(slugOrId: string, userId: Types.ObjectId) {
     const moduleDoc = await findPublishedModule(slugOrId);
-    const [progress, schedule, quiz] = await Promise.all([
+    const [progress, schedule, quiz, shares] = await Promise.all([
       UserProgress.findOne({ user: userId }),
       CalendarSchedule.findOne({ user: userId, module: moduleDoc._id, status: "scheduled" }),
       Quiz.findOne({ module: moduleDoc._id }),
+      sharesFor(userId, [moduleDoc]),
     ]);
     return toModuleItem(moduleDoc, {
       progress,
       quiz: quiz ?? undefined,
       schedule: schedule ?? null,
       withSpeakers: true,
+      share: shares.get(moduleDoc._id.toString()) ?? null,
     });
   }
 

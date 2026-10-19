@@ -9,8 +9,8 @@ import { IUserProgress, UserProgress } from "../../models/progress.model";
 import { Quiz } from "../../models/quiz.model";
 import { Settings } from "../../models/settings.model";
 import { User } from "../../models/user.model";
-import { CertificateContent, CmsCertificateService } from "../../services/cms-certificate.service";
-import { CmsModule, CmsModulesService } from "../../services/cms-modules.service";
+import { CmsCertificateService } from "../../services/cms-certificate.service";
+import { CmsModulesService } from "../../services/cms-modules.service";
 import { ModuleCatalogService, isQuizOpen, sessionState } from "../../services/module-catalog.service";
 import { isAddress } from "ethers";
 import { ApiError } from "../../utils/api-error";
@@ -25,6 +25,7 @@ import {
   heldTokenIds,
   holdsCapstone,
 } from "../../utils/badges-contract";
+import { composeBadgeShare } from "../../utils/badge-share";
 import { generateVerificationCode } from "../../utils/crypto";
 
 /** A claim still unconfirmed after this is treated as failed, so the learner can claim again. */
@@ -65,50 +66,6 @@ async function earnedBadges(progress: IUserProgress | null) {
       };
     })
     .sort((a, b) => (a.week ?? 99) - (b.week ?? 99));
-}
-
-const joinText = (...parts: (string | undefined)[]) => parts.map((p) => p?.trim()).filter(Boolean).join(" ");
-
-/**
- * Ready-made posts for sharing one module badge on LinkedIn and X: they tag the
- * module's partner (its "X Handles" / "LinkedIn Handles" in the CMS) and the
- * cohort's own handles, so every share reaches the partner's audience too.
- * A module's own "Share Text" can replace the wording, using {badge} {title}
- * {week} {partner} {handles} {link}.
- */
-function badgeShare(
-  badge: { name: string; week: number | null; moduleTitle: string | null },
-  module: CmsModule | undefined,
-  content: CertificateContent,
-  link: string | null
-) {
-  const title = badge.moduleTitle ?? module?.title ?? "";
-  const partner = module?.partner && module.partner !== "Si Her DeFi" ? module.partner : "";
-  const handles = {
-    x: joinText(module?.share.x, content.shareXHandles),
-    linkedin: joinText(module?.share.linkedin, content.shareLinkedinHandles),
-  };
-  const compose = (platform: "x" | "linkedin") => {
-    const custom = module?.share.text;
-    if (custom) {
-      const filled = custom
-        .replace(/\{badge\}/gi, badge.name)
-        .replace(/\{title\}/gi, title)
-        .replace(/\{week\}/gi, badge.week ? String(badge.week) : "")
-        .replace(/\{partner\}/gi, partner)
-        .replace(/\{link\}/gi, link ?? "");
-      return /\{handles\}/i.test(filled)
-        ? filled.replace(/\{handles\}/gi, handles[platform])
-        : joinText(filled, handles[platform], content.shareHashtags);
-    }
-    const what = `I just earned the "${badge.name}" badge in Si Her DeFi: ${title}${
-      partner ? ` with ${partner}` : ""
-    }! 🎉`;
-    return platform === "x"
-      ? joinText(what, handles.x, content.shareHashtags, link ?? undefined)
-      : `${joinText(what, handles.linkedin)}\n\n${joinText(content.shareHashtags)}${link ? `\n${link}` : ""}`.trim();
-  };
-  return { x: compose("x"), linkedin: compose("linkedin") };
 }
 
 /**
@@ -270,7 +227,7 @@ export class CertificateService {
     const shareLink = cert.status === "locked" ? null : verifyUrl(cert.verificationCode);
     const sharedBadges = badges.map((b) => ({
       ...b,
-      share: badgeShare(b, catalog?.modules.find((m) => m.week === b.week), content, shareLink),
+      share: composeBadgeShare(b, catalog?.modules.find((m) => m.week === b.week), content, shareLink),
     }));
     const claimPending =
       cert.mint?.state === "pending" && Date.now() - new Date(cert.mint.startedAt).getTime() < STALE_CLAIM_MS;

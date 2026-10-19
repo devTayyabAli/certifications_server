@@ -68,7 +68,7 @@ export interface CertificateContent {
 }
 
 const DEFAULTS: CertificateContent = {
-  pageTitle: "Your certificate",
+  pageTitle: "Your Achievements",
   pageSubtitle: "",
   certificateImage: null,
   programName: "Si Her DeFi",
@@ -100,8 +100,10 @@ export class CmsCertificateService {
       const rows = await readCmsTable(CERTIFICATE_SECTION);
       const v = rows?.[0]?.values ?? {};
       const pick = (key: keyof CertificateContent) => (v[key]?.trim() ? v[key].trim() : DEFAULTS[key]);
+      // The section was saved as "Your On-Chain Certificate"; that heading is now Achievements.
+      const pageTitle = pick("pageTitle") as string;
       value = {
-        pageTitle: pick("pageTitle") as string,
+        pageTitle: pageTitle === "Your On-Chain Certificate" ? DEFAULTS.pageTitle : pageTitle,
         pageSubtitle: pick("pageSubtitle") as string,
         certificateImage: /^https:\/\//i.test(v.certificateImage?.trim() ?? "") ? v.certificateImage.trim() : null,
         programName: pick("programName") as string,
