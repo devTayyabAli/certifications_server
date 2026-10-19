@@ -1,4 +1,4 @@
-import { CmsTableDef, readCmsTable } from "./cms-table.service";
+import { CmsTableDef, readCmsTable, readSectionFieldKeys } from "./cms-table.service";
 
 /**
  * Certificate wording, managed in the CMS on the Si Her DeFi (Base) page,
@@ -65,6 +65,8 @@ export interface CertificateContent {
   shareXHandles: string;
   shareLinkedinHandles: string;
   shareHashtags: string;
+  /** cohort label, dates and program name, in the order set in the CMS */
+  detailsLine: string;
 }
 
 const DEFAULTS: CertificateContent = {
@@ -87,7 +89,19 @@ const DEFAULTS: CertificateContent = {
   shareXHandles: "",
   shareLinkedinHandles: "",
   shareHashtags: "#SiHerDeFi",
+  detailsLine: "Cohort 01 · Sep 24 – Dec 3 2026 · Si Her DeFi",
 };
+
+/** The line under the page title. Only these three follow the CMS field order. */
+const DETAIL_KEYS = ["cohortLabel", "cohortDates", "programName"] as const;
+
+function detailsLine(value: Pick<CertificateContent, (typeof DETAIL_KEYS)[number]>, order: string[] | null) {
+  const ranked = (order ?? []).filter((key): key is (typeof DETAIL_KEYS)[number] =>
+    (DETAIL_KEYS as readonly string[]).includes(key)
+  );
+  for (const key of DETAIL_KEYS) if (!ranked.includes(key)) ranked.push(key);
+  return ranked.map((key) => value[key]?.trim()).filter(Boolean).join(" · ");
+}
 
 const CACHE_TTL_MS = 60 * 1000;
 let cache: { expiresAt: number; value: CertificateContent } | null = null;
@@ -97,7 +111,7 @@ export class CmsCertificateService {
     if (cache && cache.expiresAt > Date.now()) return cache.value;
     let value = DEFAULTS;
     try {
-      const rows = await readCmsTable(CERTIFICATE_SECTION);
+      const [rows, order] = await Promise.all([readCmsTable(CERTIFICATE_SECTION), readSectionFieldKeys(CERTIFICATE_SECTION)]);
       const v = rows?.[0]?.values ?? {};
       const pick = (key: keyof CertificateContent) => (v[key]?.trim() ? v[key].trim() : DEFAULTS[key]);
       // The section was saved as "Your On-Chain Certificate"; that heading is now Achievements.
@@ -121,7 +135,9 @@ export class CmsCertificateService {
         shareXHandles: pick("shareXHandles") as string,
         shareLinkedinHandles: pick("shareLinkedinHandles") as string,
         shareHashtags: pick("shareHashtags") as string,
+        detailsLine: "",
       };
+      value.detailsLine = detailsLine(value, order);
     } catch (err) {
       console.warn("⚠️ Could not load certificate wording from SI3 CMS:", (err as Error).message);
       if (cache) return cache.value;

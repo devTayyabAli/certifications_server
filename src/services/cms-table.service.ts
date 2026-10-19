@@ -247,6 +247,34 @@ async function pageSections(def: CmsTableDef) {
 }
 
 /**
+ * Field keys of a section, in the order they are arranged in the CMS.
+ * `null` when the section isn't on the page.
+ */
+export async function readSectionFieldKeys(def: CmsTableDef): Promise<string[] | null> {
+  if (!def.page || def.page.list) return null;
+  const found = await pageSections(def);
+  if (!found) return null;
+  const section = found.sections.find(found.isNamed);
+  if (!section) return null;
+
+  const lookup = new Map<string, string>();
+  for (const field of def.fields) {
+    for (const name of [field.name, field.key, ...(field.aliases ?? [])]) lookup.set(normalizeName(name), field.key);
+  }
+  const keys: string[] = [];
+  const seen = new Set<string>();
+  for (const node of withSubsections(section.data?.tree ?? {})) {
+    for (const field of node.fields ?? []) {
+      const key = lookup.get(normalizeName(String(field.name || field.label || "")));
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      keys.push(key);
+    }
+  }
+  return keys;
+}
+
+/**
  * Reads the definition's content from the Si Her DeFi page. Returns `null`
  * when the page or section isn't set up, so the caller can fall back.
  */
