@@ -14,6 +14,15 @@ export const CERTIFICATE_SECTION: CmsTableDef = {
     // the certificate page's own heading, and the line under it (else "cohort · dates · program")
     { key: "pageTitle", columnId: "col-cert-page-title", name: "Page Title", type: "string" },
     { key: "pageSubtitle", columnId: "col-cert-page-subtitle", name: "Page Subtitle", type: "string" },
+    // the certificate artwork (2000×2000, same layout as the built-in one); the name, badges
+    // and on-chain details are drawn on top by the app
+    {
+      key: "certificateImage",
+      columnId: "col-cert-image",
+      name: "Certificate Image",
+      type: "image",
+      aliases: ["Certificate Background", "Background Image", "Certificate Design"],
+    },
     { key: "programName", columnId: "col-cert-program", name: "Program Name", type: "string" },
     { key: "cohortLabel", columnId: "col-cert-cohort", name: "Cohort Label", type: "string" },
     { key: "cohortDates", columnId: "col-cert-dates", name: "Cohort Dates", type: "string" },
@@ -37,6 +46,8 @@ export interface CertificateContent {
   pageTitle: string;
   /** empty = "cohort label · cohort dates · program name" */
   pageSubtitle: string;
+  /** the certificate artwork from the CMS; null = the app's built-in design */
+  certificateImage: string | null;
   programName: string;
   cohortLabel: string;
   cohortDates: string;
@@ -59,6 +70,7 @@ export interface CertificateContent {
 const DEFAULTS: CertificateContent = {
   pageTitle: "Your certificate",
   pageSubtitle: "",
+  certificateImage: null,
   programName: "Si Her DeFi",
   cohortLabel: "Cohort 01",
   cohortDates: "Sep 24 – Dec 3 2026",
@@ -91,6 +103,7 @@ export class CmsCertificateService {
       value = {
         pageTitle: pick("pageTitle") as string,
         pageSubtitle: pick("pageSubtitle") as string,
+        certificateImage: /^https:\/\//i.test(v.certificateImage?.trim() ?? "") ? v.certificateImage.trim() : null,
         programName: pick("programName") as string,
         cohortLabel: pick("cohortLabel") as string,
         cohortDates: pick("cohortDates") as string,

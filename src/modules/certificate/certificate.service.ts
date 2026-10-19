@@ -101,7 +101,7 @@ function badgeShare(
         ? filled.replace(/\{handles\}/gi, handles[platform])
         : joinText(filled, handles[platform], content.shareHashtags);
     }
-    const what = `I just earned the "${badge.name}" badge in Si Her DeFi${badge.week ? `, Week ${badge.week}` : ""}: ${title}${
+    const what = `I just earned the "${badge.name}" badge in Si Her DeFi: ${title}${
       partner ? ` with ${partner}` : ""
     }! 🎉`;
     return platform === "x"

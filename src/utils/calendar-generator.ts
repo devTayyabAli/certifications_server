@@ -226,7 +226,18 @@ function formatCalendarDate(date: Date): string {
   return formatCalendarUtcDate(date).slice(0, 8);
 }
 
-/** One VEVENT (with a 15-minute reminder), unfolded. */
+/** Calendar reminders a day and an hour before the session. */
+function reminderAlarms(summary: string): string[] {
+  return ["-P1D", "-PT1H"].flatMap((trigger) => [
+    "BEGIN:VALARM",
+    `TRIGGER:${trigger}`,
+    "ACTION:DISPLAY",
+    `DESCRIPTION:Reminder: ${summary}`,
+    "END:VALARM",
+  ]);
+}
+
+/** One VEVENT (with reminders a day and an hour before), unfolded. */
 function icsEventLines(event: CalendarEventPayload): string[] {
   const start = parseValidDate(event.startDate);
   const end = event.endDate ? parseValidDate(event.endDate) : new Date(start.getTime() + 60 * 60 * 1000);
@@ -266,10 +277,8 @@ function icsEventLines(event: CalendarEventPayload): string[] {
     "STATUS:CONFIRMED",
     event.allDay ? "TRANSP:TRANSPARENT" : "TRANSP:OPAQUE",
     "SEQUENCE:0",
-    // An all-day placeholder gets no "starts in 15 minutes" alert
-    ...(event.allDay
-      ? []
-      : ["BEGIN:VALARM", "TRIGGER:-PT15M", "ACTION:DISPLAY", `DESCRIPTION:Reminder: ${summary}`, "END:VALARM"]),
+    // An all-day placeholder gets no "starts soon" alerts
+    ...(event.allDay ? [] : reminderAlarms(summary)),
     "END:VEVENT",
   ];
 }
@@ -338,9 +347,7 @@ export function generateInviteIcs(event: CalendarEventPayload, opts: InviteOptio
     `ATTENDEE;CN=${cn(opts.attendee.name || opts.attendee.email)};ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:${opts.attendee.email}`,
     `STATUS:${cancel ? "CANCELLED" : "CONFIRMED"}`,
     "TRANSP:OPAQUE",
-    ...(cancel
-      ? []
-      : ["BEGIN:VALARM", "TRIGGER:-PT15M", "ACTION:DISPLAY", `DESCRIPTION:Reminder: ${escapeIcsText(event.title)}`, "END:VALARM"]),
+    ...(cancel ? [] : reminderAlarms(escapeIcsText(event.title))),
     "END:VEVENT",
     "END:VCALENDAR",
   ];

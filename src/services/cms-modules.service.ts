@@ -124,8 +124,10 @@ export const QUIZ_QUESTIONS_TABLE: CmsTableDef = {
   description: "Module quiz questions — one row per question, linked to the module by Week.",
   page: { section: "Modules", list: "quiz_questions" },
   fields: [
-    { key: "week", columnId: "col-qz-week", name: "Week", type: "number", required: true },
-    { key: "order", columnId: "col-qz-order", name: "Order", type: "number", required: true },
+    // which module the question belongs to: its title ("Module") or, the older way, its Week number
+    { key: "module", columnId: "col-qz-module", name: "Module", type: "string", aliases: ["Module Name", "Module Title"] },
+    { key: "week", columnId: "col-qz-week", name: "Week", type: "number" },
+    { key: "order", columnId: "col-qz-order", name: "Order", type: "number" },
     { key: "question", columnId: "col-qz-question", name: "Question", type: "text", required: true },
     { key: "optionA", columnId: "col-qz-a", name: "Option A", type: "string", required: true },
     { key: "optionB", columnId: "col-qz-b", name: "Option B", type: "string", required: true },
@@ -626,21 +628,36 @@ async function load(): Promise<CmsModuleCatalog | null> {
     groupedWeeks.add(week);
   }
 
-  // 2. The older flat list (one row per question with a Week) — still read for
-  //    any module that doesn't have its own sub-section yet
+  // 2. The quiz_questions list (one row per question): each row names its module
+  //    by title in "Module", or by number in "Week"; rows without an Order keep
+  //    their place in the list
+  const plainTitle = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const weekOfRow = (v: Record<string, string>) => {
+    const name = plainTitle(v.module ?? "");
+    if (name) {
+      const byTitle = modules.find((m) => plainTitle(m.title) === name) ?? modules.find((m) => plainTitle(m.title).startsWith(name));
+      if (byTitle) return byTitle.week;
+    }
+    return parseWeek(v.week);
+  };
   const flat = new Map<number, CmsQuizQuestion[]>();
-  for (const row of questionRows ?? []) {
+  for (const [index, row] of (questionRows ?? []).entries()) {
     const v = row.values;
     if (!cmsBoolean(v.active, true)) continue;
-    if (!v.question && !v.week) continue;
-    const week = parseWeek(v.week);
+    if (!v.question && !v.week && !v.module) continue;
+    const week = weekOfRow(v);
     if (!Number.isInteger(week) || !v.question) {
-      warnings.push(`Quiz row skipped — needs a Week and a Question.`);
+      warnings.push(
+        v.module?.trim()
+          ? `Quiz row "${(v.question ?? "").slice(0, 40)}" skipped — no module titled "${v.module.trim()}".`
+          : `Quiz row "${(v.question ?? "").slice(0, 40)}" skipped — needs a Module (its title) and a Question.`
+      );
       continue;
     }
     if (groupedWeeks.has(week)) continue; // that module's sub-section wins
     const list = flat.get(week) ?? [];
-    const q = toQuestion(v, week, cmsNumber(v.order, list.length + 1));
+    // no Order: its position in the list (after any numbered ones)
+    const q = toQuestion(v, week, cmsNumber(v.order, 1000 + index));
     if (q) list.push(q);
     flat.set(week, list);
   }
