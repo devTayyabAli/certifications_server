@@ -1,8 +1,5 @@
 import { Types } from "mongoose";
 import { HttpStatus } from "../../constants/http-status";
-import { Module } from "../../models/module.model";
-import { UserProgress } from "../../models/progress.model";
-import { Quiz } from "../../models/quiz.model";
 import { ISocialFollow, ISurvey, Survey, isSurveyCompleted } from "../../models/survey.model";
 import { CmsOnboardingService, OnboardingContent } from "../../services/cms-onboarding.service";
 import { CmsPart2Service } from "../../services/cms-part2.service";
@@ -106,7 +103,7 @@ export class OnboardService {
       Survey.findOne({ user: userId, surveyType: "part1" }),
       Survey.findOne({ user: userId, surveyType: "part2" }),
       CmsOnboardingService.getPart("part1"),
-      this.isPart2Unlocked(userId),
+      this.isPart2Unlocked(),
     ]);
 
     return {
@@ -115,7 +112,7 @@ export class OnboardService {
       part1CompletedAt: isSurveyCompleted(part1) ? part1?.completedAt ?? null : null,
       part2Done: isSurveyCompleted(part2),
       part2CompletedAt: isSurveyCompleted(part2) ? part2?.completedAt ?? null : null,
-      // Part 2 opens once every session is done (quiz passed or skipped)
+      // Part 2 opens when the team switches it on in the CMS
       part2Unlocked,
       // What the dashboard "Start here" card shows — straight from the CMS
       part1Card: content
@@ -228,29 +225,18 @@ export class OnboardService {
   }
 
   /**
-   * Part 2 opens once the team switches it on in the CMS ("Onboarding Part 2"
-   * → Open) and every session is done: each published module with a quiz has
-   * been completed (its quiz passed, or skipped after every attempt).
+   * Part 2 opens when the team switches it on in the CMS ("Onboarding Part 2"
+   * → Open). Module progress does not gate it.
    */
-  static async isPart2Unlocked(userId: Types.ObjectId) {
-    // closed for everyone until the team switches it on in the CMS
-    if (!(await CmsPart2Service.getContent()).open) return false;
-    const [modules, progress] = await Promise.all([
-      Module.find({ isPublished: true }, { _id: 1 }),
-      UserProgress.findOne({ user: userId }, { completedModules: 1 }),
-    ]);
-    const quizzes = await Quiz.find({ module: { $in: modules.map((m) => m._id) }, isActive: true }, { module: 1, questions: 1 });
-    const withQuiz = quizzes.filter((q) => q.questions.length > 0).map((q) => q.module.toString());
-    if (withQuiz.length === 0) return false;
-    const done = new Set((progress?.completedModules ?? []).map((id) => id.toString()));
-    return withQuiz.every((id) => done.has(id));
+  static async isPart2Unlocked() {
+    return (await CmsPart2Service.getContent()).open;
   }
 
   /** The Part 2 page: copy and questions from the CMS, whether it's open, and the learner's saved answers. */
   static async getPart2(userId: Types.ObjectId) {
     const [content, unlocked, survey] = await Promise.all([
       CmsPart2Service.getContent(),
-      this.isPart2Unlocked(userId),
+      this.isPart2Unlocked(),
       Survey.findOne({ user: userId, surveyType: "part2" }),
     ]);
     const answers: Record<string, string> = {};
@@ -267,8 +253,8 @@ export class OnboardService {
   }
 
   static async submitPart2(userId: Types.ObjectId, data: Part2SurveyInput) {
-    if (!(await this.isPart2Unlocked(userId))) {
-      throw ApiError.forbidden("Part 2 opens once every session is done.");
+    if (!(await this.isPart2Unlocked())) {
+      throw ApiError.forbidden("Part 2 isn’t open yet.");
     }
     const { questions } = await CmsPart2Service.getContent();
     const missing = questions.filter((q) => q.required && !data.answers[q.id]?.trim());

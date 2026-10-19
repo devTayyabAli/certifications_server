@@ -1,8 +1,8 @@
 import { CmsTableDef, cmsBoolean, readCmsTable } from "./cms-table.service";
 
 /**
- * Si Her Onboard – Part 2: a short close-out reflection that opens once every
- * session is done. Managed in the SI3 CMS on the "Si Her DeFi (Base)" page →
+ * Si Her Onboard – Part 2: a short close-out reflection that opens when the
+ * team switches Open on. Managed in the SI3 CMS on the "Si Her DeFi (Base)" page →
  * section "Onboarding Part 2": `title`, `subtitle`, and a `reflection_questions`
  * list (one item per question, in the order shown). Until that section exists
  * the default copy below is used.
