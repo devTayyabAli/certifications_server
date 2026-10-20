@@ -222,13 +222,18 @@ export class CertificateService {
           capstone: cert.status === "unlocked" && allModulesDone && !held.has(CAPSTONE_TOKEN_ID),
         }
       : null;
-    // one post per badge, for LinkedIn and X
+    // one share block per badge: sample copy, handles to tag, session image
     const catalog = await CmsModulesService.getCatalog().catch(() => null);
-    const shareLink = cert.status === "locked" ? null : verifyUrl(cert.verificationCode);
-    const sharedBadges = badges.map((b) => ({
-      ...b,
-      share: composeBadgeShare(b, catalog?.modules.find((m) => m.week === b.week), content, shareLink),
-    }));
+    const sharedBadges = await Promise.all(
+      badges.map(async (b) => {
+        const m = modules.find((x) => x.week === b.week);
+        const speakers = m ? await ModuleCatalogService.speakersFor(m).catch(() => []) : [];
+        return {
+          ...b,
+          share: composeBadgeShare(b, catalog?.modules.find((c) => c.week === b.week), content, speakers),
+        };
+      })
+    );
     const claimPending =
       cert.mint?.state === "pending" && Date.now() - new Date(cert.mint.startedAt).getTime() < STALE_CLAIM_MS;
 

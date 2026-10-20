@@ -1,5 +1,4 @@
 import { Types } from "mongoose";
-import { env } from "../../config/env";
 import { CalendarType } from "../../constants/calendar";
 import { CalendarSchedule, ICalendarSchedule } from "../../models/calendar-schedule.model";
 import { Certificate } from "../../models/certificate.model";
@@ -7,8 +6,8 @@ import { IModule, Module } from "../../models/module.model";
 import { Profile } from "../../models/profile.model";
 import { IUserProgress, UserProgress } from "../../models/progress.model";
 import { IQuiz, Quiz } from "../../models/quiz.model";
-import { CmsCertificateService } from "../../services/cms-certificate.service";
-import { CmsModulesService } from "../../services/cms-modules.service";
+import { CertificateContent, CmsCertificateService } from "../../services/cms-certificate.service";
+import { CmsModule, CmsModulesService } from "../../services/cms-modules.service";
 import { CmsSpeaker, CmsSpeakerService } from "../../services/cms-speaker.service";
 import {
   ModuleCatalogService,
@@ -83,7 +82,8 @@ async function toModuleItem(
     withSpeakers?: boolean;
     /** Already loaded, so the list doesn't look speakers up again per module */
     speakers?: CmsSpeaker[];
-    share?: { x: string; linkedin: string } | null;
+    /** CMS wording and handles, loaded once for every module; omit for no share block */
+    share?: ShareContext | null;
   }
 ) {
   const state = sessionState(m);
@@ -99,10 +99,17 @@ async function toModuleItem(
   // Added before the session's date or time changed: the learner's calendar has
   // the old slot, so it's no longer shown as added
   const calendarOutdated = !!schedule && !sameSlot;
-  const speakers = (
-    ctx.speakers ?? (ctx.withSpeakers ? await ModuleCatalogService.speakersFor(m) : [])
-  ).map(speakerItem);
+  const cmsSpeakers = ctx.speakers ?? (ctx.withSpeakers ? await ModuleCatalogService.speakersFor(m) : []);
+  const speakers = cmsSpeakers.map(speakerItem);
   const completed = (ctx.progress?.completedModules ?? []).some((id) => id.toString() === m._id.toString());
+  const share = ctx.share
+    ? composeBadgeShare(
+        { name: m.badgeName || `Week ${m.week} badge`, week: m.week, moduleTitle: m.title },
+        ctx.share.cmsModules.find((c) => c.week === m.week) ?? ctx.share.cmsModules.find((c) => c.slug === m.slug),
+        ctx.share.content,
+        cmsSpeakers
+      )
+    : null;
 
   return {
     id: m._id,
@@ -138,37 +145,23 @@ async function toModuleItem(
     calendarOutdated,
     addedToCalendarAt: schedule?.updatedAt ?? null,
     speakers,
-    /** the post for this badge, with the CMS wording and the partner tags filled in */
-    share: ctx.share ?? null,
+    /** what to post for this badge: sample copy, handles to tag, session image */
+    share,
   };
 }
 
-/** One share post per module, from the CMS wording and the partner handles. */
-async function sharesFor(userId: Types.ObjectId, modules: IModule[]) {
-  const [catalog, content, cert] = await Promise.all([
+interface ShareContext {
+  cmsModules: CmsModule[];
+  content: CertificateContent;
+}
+
+/** The CMS wording and handles behind every module's share block, read once. */
+async function shareContext(): Promise<ShareContext> {
+  const [catalog, content] = await Promise.all([
     CmsModulesService.getCatalog().catch(() => null),
     CmsCertificateService.getContent(),
-    Certificate.findOne({ user: userId }, { status: 1, verificationCode: 1 }),
   ]);
-  const link =
-    cert && cert.status !== "locked" && cert.verificationCode
-      ? `${env.FRONTEND_URL.replace(/\/+$/, "")}/credential/${encodeURIComponent(cert.verificationCode)}`
-      : null;
-  const cmsModules = catalog?.modules ?? [];
-  const out = new Map<string, { x: string; linkedin: string }>();
-  for (const m of modules) {
-    const cms = cmsModules.find((c) => c.week === m.week) ?? cmsModules.find((c) => c.slug === m.slug);
-    out.set(
-      m._id.toString(),
-      composeBadgeShare(
-        { name: m.badgeName || `Week ${m.week} badge`, week: m.week, moduleTitle: m.title },
-        cms,
-        content,
-        link
-      )
-    );
-  }
-  return out;
+  return { cmsModules: catalog?.modules ?? [], content };
 }
 
 export { calendarEvent };
@@ -180,11 +173,11 @@ export class ModuleService {
     // module list: sending mail can take longer than loading the page.
     void CalendarInviteService.syncInvites();
     const modules = await Module.find({ isPublished: true }).sort({ week: 1, order: 1 });
-    const [progress, schedules, quizzes, shares, speakerLists] = await Promise.all([
+    const [progress, schedules, quizzes, share, speakerLists] = await Promise.all([
       UserProgress.findOne({ user: userId }),
       CalendarSchedule.find({ user: userId, status: "scheduled" }),
       Quiz.find({ module: { $in: modules.map((m) => m._id) } }),
-      sharesFor(userId, modules),
+      shareContext(),
       Promise.all(modules.map((m) => ModuleCatalogService.speakersFor(m))),
     ]);
     const scheduleMap = new Map(schedules.map((s) => [s.module.toString(), s]));
@@ -197,7 +190,7 @@ export class ModuleService {
           quiz: quizMap.get(m._id.toString()),
           schedule: scheduleMap.get(m._id.toString()) ?? null,
           speakers: speakerLists[index],
-          share: shares.get(m._id.toString()) ?? null,
+          share,
         })
       )
     );
@@ -205,18 +198,18 @@ export class ModuleService {
 
   static async getModuleBySlugOrId(slugOrId: string, userId: Types.ObjectId) {
     const moduleDoc = await findPublishedModule(slugOrId);
-    const [progress, schedule, quiz, shares] = await Promise.all([
+    const [progress, schedule, quiz, share] = await Promise.all([
       UserProgress.findOne({ user: userId }),
       CalendarSchedule.findOne({ user: userId, module: moduleDoc._id, status: "scheduled" }),
       Quiz.findOne({ module: moduleDoc._id }),
-      sharesFor(userId, [moduleDoc]),
+      shareContext(),
     ]);
     return toModuleItem(moduleDoc, {
       progress,
       quiz: quiz ?? undefined,
       schedule: schedule ?? null,
       withSpeakers: true,
-      share: shares.get(moduleDoc._id.toString()) ?? null,
+      share,
     });
   }
 
