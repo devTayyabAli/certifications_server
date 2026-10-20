@@ -13,12 +13,16 @@ import { CmsTableDef, cmsBoolean, cmsNumber, mapCmsItems, readCmsTable, readPage
  * table, matched by the speaker's Session Title (or the module's Speakers list).
  */
 
+/** The section may be called "Modules" or, once the quizzes sit under each module, "Modules & Quizzes". */
+export const MODULES_SECTION_ALIASES = ["Modules & Quizzes", "Modules and Quizzes", "Modules + Quizzes"];
+
 export const MODULES_TABLE: CmsTableDef = {
   slug: "si-her-defi-modules",
   name: "Si Her DeFi Modules",
   description: "Cohort modules for the learner app — one row per week.",
   page: {
     section: "Modules",
+    sectionAliases: MODULES_SECTION_ALIASES,
     list: "modules",
     // Week is the module's identity on the page — editing the title keeps progress attached
     itemId: (v, i) => `module-week-${(v.week ?? "").match(/\d+/)?.[0] ?? `item-${i + 1}`}`,
@@ -121,8 +125,12 @@ export const MODULES_TABLE: CmsTableDef = {
 export const QUIZ_QUESTIONS_TABLE: CmsTableDef = {
   slug: "si-her-defi-quiz-questions",
   name: "Si Her DeFi Quiz Questions",
-  description: "Module quiz questions — one row per question, linked to the module by Week.",
-  page: { section: "Modules", list: "quiz_questions" },
+  description: "Module quiz questions — one row per question, in a sub-section per module (or linked by Module title / Week).",
+  // Each module's questions live in a sub-section named after it ("Modules &
+  // Quizzes" → "From TradFi to DeFi" → quiz_questions). A flat quiz_questions
+  // list at the top of a section is the older layout; rootOnly keeps it from
+  // reading one module's sub-section as if it were that flat list.
+  page: { section: "Modules", sectionAliases: MODULES_SECTION_ALIASES, list: "quiz_questions", rootOnly: true },
   fields: [
     // which module the question belongs to: its title ("Module") or, the older way, its Week number
     { key: "module", columnId: "col-qz-module", name: "Module", type: "string", aliases: ["Module Name", "Module Title"] },
@@ -468,6 +476,8 @@ export function parseQuizText(text: string | undefined): Record<string, string>[
 
 const CACHE_TTL_MS = 60 * 1000;
 let cache: { expiresAt: number; value: CmsModuleCatalog | null } | null = null;
+/** One CMS read shared by every caller that arrives while it is in flight. */
+let catalogInflight: Promise<CmsModuleCatalog | null> | null = null;
 
 async function load(): Promise<CmsModuleCatalog | null> {
   const [moduleRows, questionRows, questionGroups] = await Promise.all([
@@ -596,17 +606,19 @@ async function load(): Promise<CmsModuleCatalog | null> {
     questionsByWeek.set(week, list);
   }
 
-  // 1. One sub-section per module inside "quiz_questions" (e.g. "Week 1 · Si Her
-  //    Collective Capital") with that module's questions in order. The module is
-  //    found from a Week field on the sub-section, "Week N" in its name, or its
-  //    name matching the module title.
+  // 1. One sub-section per module (e.g. "Modules & Quizzes" → "From TradFi to
+  //    DeFi") with that module's questions in order. The module is found from
+  //    the sub-section's name matching the module title, "Week N" in its name,
+  //    or a Week field on the sub-section.
   const weekFromGroup = (title: string, values: Record<string, string>) => {
     const fromField = parseWeek(values.week);
     if (Number.isInteger(fromField)) return fromField;
     const fromName = title.match(/\bweek\s*0*(\d+)/i)?.[1];
     if (fromName) return Number(fromName);
     const plain = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
-    const byTitle = modules.find((m) => plain(title).includes(plain(m.title)) && plain(m.title).length > 0);
+    const byTitle =
+      modules.find((m) => plain(m.title) === plain(title)) ??
+      modules.find((m) => plain(title).includes(plain(m.title)) && plain(m.title).length > 0);
     return byTitle ? byTitle.week : NaN;
   };
   const groupedWeeks = new Set<number>(ownQuestions.keys());
@@ -674,15 +686,21 @@ export class CmsModulesService {
    * form hasn't been set up. Cached for a minute.
    */
   static async getCatalog(): Promise<CmsModuleCatalog | null> {
-    if (!cache || cache.expiresAt <= Date.now()) {
-      try {
-        cache = { expiresAt: Date.now() + CACHE_TTL_MS, value: await load() };
-      } catch (err) {
-        console.warn("⚠️ Could not load modules from SI3 CMS:", (err as Error).message);
-        if (cache) return cache.value;
-        return null;
-      }
+    if (cache && cache.expiresAt > Date.now()) return cache.value;
+    if (!catalogInflight) {
+      catalogInflight = load()
+        .then((value) => {
+          cache = { expiresAt: Date.now() + CACHE_TTL_MS, value };
+          return value;
+        })
+        .catch((err) => {
+          console.warn("⚠️ Could not load modules from SI3 CMS:", (err as Error).message);
+          return cache ? cache.value : null;
+        })
+        .finally(() => {
+          catalogInflight = null;
+        });
     }
-    return cache.value;
+    return catalogInflight;
   }
 }

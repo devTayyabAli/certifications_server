@@ -6,6 +6,7 @@ import { asyncHandler } from "../../utils/async-handler";
 export class EventController {
   static getEvents = asyncHandler(async (_req: Request, res: Response) => {
     const events = await CmsEventsService.getAllEvents();
+    ApiResponse.cachePublic(res);
     return ApiResponse.success(res, {
       message: "Cohort events retrieved",
       data: events,

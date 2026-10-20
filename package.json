@@ -18,6 +18,7 @@
     "cms:onboarding:group": "tsx src/scripts/group-onboarding-research-questions.ts",
     "onboarding:reset": "tsx src/scripts/reset-onboarding.ts",
     "cms:modules:check": "tsx src/scripts/check-modules-cms.ts",
+    "cms:quizzes:group": "tsx src/scripts/group-quiz-questions-by-module.ts",
     "progress:reset": "tsx src/scripts/reset-progress.ts"
   },
   "keywords": [

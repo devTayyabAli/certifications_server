@@ -35,8 +35,15 @@ export interface CmsFieldDef {
 export interface CmsPageSource {
   /** Section title on the page, e.g. "Onboarding" */
   section: string;
+  /** Other titles the team may give the section (e.g. after renaming it) */
+  sectionAliases?: string[];
   /** Name of the list field for row-style content; omit for the section's own fields */
   list?: string;
+  /**
+   * Read the list only from a section's own fields, never from a sub-section.
+   * For lists that are also read per sub-section with `readPageSubsections`.
+   */
+  rootOnly?: boolean;
   /** Stable id for a list item (list items have no id of their own) */
   itemId?: (values: Record<string, string>, index: number) => string;
 }
@@ -183,14 +190,25 @@ export interface CmsSubsection {
 export async function readPageSubsections(def: CmsTableDef): Promise<CmsSubsection[] | null> {
   const found = await pageSections(def);
   if (!found) return null;
-  const section = found.sections.find(found.isNamed);
-  if (!section) return null;
+  // The named section, plus a section carrying the list's own name (e.g. a
+  // "quiz_questions" section whose sub-sections are the modules)
+  const listName = def.page?.list ? normalizeName(def.page.list) : null;
+  const titled = (d: (typeof found.sections)[number]) =>
+    [d.title, d.data?.tree?.name, d.data?.tree?.label].some(
+      (n) => typeof n === "string" && listName !== null && normalizeName(n) === listName
+    );
+  const parents = found.sections.filter((d) => found.isNamed(d) || titled(d));
+  if (parents.length === 0) return null;
 
   const out: CmsSubsection[] = [];
   const walk = (nodes: PageNode[] | undefined, path: string) => {
     for (const [i, node] of (nodes ?? []).entries()) {
       const title = String(node.label || node.name || "").trim();
-      const list = (node.fields ?? []).find((f) => f.type === "array" && f.name);
+      const arrays = (node.fields ?? []).filter((f) => f.type === "array" && f.name);
+      // the list this definition is about, when the sub-section has more than one
+      const list =
+        arrays.find((f) => [f.name, f.label].some((n) => n && listName !== null && normalizeName(n) === listName)) ??
+        arrays[0];
       const data = node.data ?? {};
       const own = Object.fromEntries(Object.entries(data).filter(([, v]) => !Array.isArray(v)));
       const items = list?.name ? data[list.name] : undefined;
@@ -208,7 +226,9 @@ export async function readPageSubsections(def: CmsTableDef): Promise<CmsSubsecti
       walk(node.children, `${path}-${i + 1}`);
     }
   };
-  walk((section.data?.tree as PageNode | undefined)?.children, normalizeName(def.page!.section));
+  for (const [index, parent] of parents.entries()) {
+    walk((parent.data?.tree as PageNode | undefined)?.children, `${normalizeName(def.page!.section)}${index ? `-${index}` : ""}`);
+  }
   return out;
 }
 
@@ -234,9 +254,10 @@ async function pageSections(def: CmsTableDef) {
   if (!page) return null;
 
   const wanted = normalizeName(def.page.section);
+  const wantedNames = new Set([wanted, ...(def.page.sectionAliases ?? []).map(normalizeName)]);
   const isNamed = (d: Record<string, unknown> & { data?: { tree?: PageNode } }) =>
     [d.title, d.label, d.data?.tree?.name, d.data?.tree?.label].some(
-      (n) => typeof n === "string" && normalizeName(n) === wanted
+      (n) => typeof n === "string" && wantedNames.has(normalizeName(n))
     );
   // Unpublished sections are drafts — ignored until the team publishes them
   const sections = (await db.collection("documents").find({ schemaId: page._id }).toArray())
@@ -299,7 +320,8 @@ async function readPageRecords(def: CmsTableDef): Promise<CmsRecord[] | null> {
   let tree: PageNode | null = null;
   let listField: NonNullable<PageNode["fields"]>[number] | undefined;
   search: for (const section of sections) {
-    for (const candidate of withSubsections(section.data?.tree ?? {})) {
+    const root = (section.data?.tree ?? {}) as PageNode;
+    for (const candidate of def.page.rootOnly ? [root] : withSubsections(root)) {
       listField = (candidate.fields ?? []).find(
         (f) => f.type === "array" && [f.name, f.label].some((n) => n && normalizeName(n) === listName)
       );

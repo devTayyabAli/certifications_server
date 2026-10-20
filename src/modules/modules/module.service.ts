@@ -81,6 +81,8 @@ async function toModuleItem(
     quiz?: IQuiz;
     schedule?: ICalendarSchedule | null;
     withSpeakers?: boolean;
+    /** Already loaded, so the list doesn't look speakers up again per module */
+    speakers?: CmsSpeaker[];
     share?: { x: string; linkedin: string } | null;
   }
 ) {
@@ -97,9 +99,9 @@ async function toModuleItem(
   // Added before the session's date or time changed: the learner's calendar has
   // the old slot, so it's no longer shown as added
   const calendarOutdated = !!schedule && !sameSlot;
-  const speakers = ctx.withSpeakers
-    ? (await ModuleCatalogService.speakersFor(m)).map(speakerItem)
-    : [];
+  const speakers = (
+    ctx.speakers ?? (ctx.withSpeakers ? await ModuleCatalogService.speakersFor(m) : [])
+  ).map(speakerItem);
   const completed = (ctx.progress?.completedModules ?? []).some((id) => id.toString() === m._id.toString());
 
   return {
@@ -174,25 +176,27 @@ export { calendarEvent };
 export class ModuleService {
   static async getAllModules(userId: Types.ObjectId) {
     await ModuleCatalogService.ensureSynced();
-    // sessions changed in the CMS: send the updated invites (at most once a minute)
-    await CalendarInviteService.syncInvites();
+    // Invite updates go out at most once a minute. They must not hold the
+    // module list: sending mail can take longer than loading the page.
+    void CalendarInviteService.syncInvites();
     const modules = await Module.find({ isPublished: true }).sort({ week: 1, order: 1 });
-    const [progress, schedules, quizzes] = await Promise.all([
+    const [progress, schedules, quizzes, shares, speakerLists] = await Promise.all([
       UserProgress.findOne({ user: userId }),
       CalendarSchedule.find({ user: userId, status: "scheduled" }),
       Quiz.find({ module: { $in: modules.map((m) => m._id) } }),
+      sharesFor(userId, modules),
+      Promise.all(modules.map((m) => ModuleCatalogService.speakersFor(m))),
     ]);
     const scheduleMap = new Map(schedules.map((s) => [s.module.toString(), s]));
     const quizMap = new Map(quizzes.map((q) => [q.module.toString(), q]));
-    const shares = await sharesFor(userId, modules);
 
     return Promise.all(
-      modules.map((m) =>
+      modules.map((m, index) =>
         toModuleItem(m, {
           progress,
           quiz: quizMap.get(m._id.toString()),
           schedule: scheduleMap.get(m._id.toString()) ?? null,
-          withSpeakers: true,
+          speakers: speakerLists[index],
           share: shares.get(m._id.toString()) ?? null,
         })
       )

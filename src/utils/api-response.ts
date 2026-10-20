@@ -9,6 +9,18 @@ export interface ApiResponseOptions<T> {
 }
 
 export class ApiResponse {
+  /**
+   * Let Vercel's edge keep a public response for a minute. The browser still
+   * asks again (max-age=0); the edge can answer without waking the US function.
+   * Only for responses that are the same for every learner.
+   */
+  static cachePublic(res: Response, seconds = 60) {
+    res.setHeader(
+      "Cache-Control",
+      `public, max-age=0, s-maxage=${seconds}, stale-while-revalidate=${seconds}`
+    );
+  }
+
   static success<T>(
     res: Response,
     {

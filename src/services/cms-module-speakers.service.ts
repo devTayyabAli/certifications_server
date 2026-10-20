@@ -99,11 +99,19 @@ function toSpeaker(r: CmsRecord, weeks: number[]): ModuleSpeaker | null {
 
 const CACHE_TTL_MS = 60 * 1000;
 let cache: { expiresAt: number; value: ModuleSpeaker[] | null } | null = null;
+let speakersInflight: Promise<ModuleSpeaker[] | null> | null = null;
 
 export class CmsModuleSpeakersService {
   /** Every active speaker in the CMS Speakers section, in list order; `null` when the section isn't set up. */
   static async getAll(): Promise<ModuleSpeaker[] | null> {
     if (cache && cache.expiresAt > Date.now()) return cache.value;
+    if (!speakersInflight) speakersInflight = this.load().finally(() => {
+      speakersInflight = null;
+    });
+    return speakersInflight;
+  }
+
+  private static async load(): Promise<ModuleSpeaker[] | null> {
     let value: ModuleSpeaker[] | null = null;
     try {
       const [rows, groups] = await Promise.all([readCmsTable(MODULE_SPEAKERS), readPageSubsections(MODULE_SPEAKERS)]);

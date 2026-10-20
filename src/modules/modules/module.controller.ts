@@ -16,6 +16,7 @@ export class ModuleController {
 
   static getCmsSpeakers = asyncHandler(async (_req: Request, res: Response) => {
     const speakers = await ModuleService.getCmsSpeakers();
+    ApiResponse.cachePublic(res);
     return ApiResponse.success(res, {
       message: "CMS cohort speakers retrieved",
       data: speakers,

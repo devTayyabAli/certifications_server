@@ -22,6 +22,7 @@ export class PartnerController {
         footerText: p.footerText,
       }));
 
+    ApiResponse.cachePublic(res);
     return ApiResponse.success(res, {
       message: "Partners retrieved successfully",
       data: partners,
@@ -30,6 +31,7 @@ export class PartnerController {
 
   /** Heading, subtitle and referral note around the partner cards (Si Her DeFi (Base) → Partners). */
   static getPartnersCopy = asyncHandler(async (_req: Request, res: Response) => {
+    ApiResponse.cachePublic(res);
     return ApiResponse.success(res, {
       message: "Partners copy",
       data: await CmsDashboardService.getPartnersCopy(),
@@ -38,6 +40,7 @@ export class PartnerController {
 
   /** "More ways to build" banner (Si Her DeFi (Base) → More Ways); null hides it. */
   static getMoreWays = asyncHandler(async (_req: Request, res: Response) => {
+    ApiResponse.cachePublic(res);
     return ApiResponse.success(res, {
       message: "More ways content",
       data: await CmsDashboardService.getMoreWays(),

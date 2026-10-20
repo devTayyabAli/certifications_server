@@ -26,6 +26,7 @@ export interface CmsSpeaker {
 
 const META_TTL_MS = 60 * 1000; // 1 minute cache
 let cachedSpeakers: { speakers: CmsSpeaker[]; expiresAt: number } | null = null;
+let speakersInflight: Promise<CmsSpeaker[]> | null = null;
 
 function cmsDb() {
   const conn = mongoose.connection as any;
@@ -43,7 +44,15 @@ export class CmsSpeakerService {
     if (cachedSpeakers && cachedSpeakers.expiresAt > Date.now()) {
       return cachedSpeakers.speakers;
     }
+    if (!speakersInflight) {
+      speakersInflight = this.fetchSpeakers().finally(() => {
+        speakersInflight = null;
+      });
+    }
+    return speakersInflight;
+  }
 
+  private static async fetchSpeakers(): Promise<CmsSpeaker[]> {
     try {
       const db = cmsDb();
       const table = await db.collection("si3tables").findOne({ slug: "si3-speakers" });
