@@ -100,6 +100,29 @@ export const MODULES_TABLE: CmsTableDef = {
       aliases: ["Partner LinkedIn", "LinkedIn Tags"],
     },
     { key: "shareText", columnId: "col-mod-share", name: "Share Text", type: "text" },
+    // the speaker's own handles to tag (when not already on their speaker card)
+    {
+      key: "speakerXHandles",
+      columnId: "col-mod-speaker-x",
+      name: "Speaker X Handles",
+      type: "string",
+      aliases: ["Speaker X", "speaker_x_handles", "speaker_x"],
+    },
+    {
+      key: "speakerLinkedinHandles",
+      columnId: "col-mod-speaker-li",
+      name: "Speaker LinkedIn Handles",
+      type: "string",
+      aliases: ["Speaker LinkedIn", "speaker_linkedin_handles", "speaker_linkedin"],
+    },
+    // the session image learners download to post with (falls back to the banner / thumbnail)
+    {
+      key: "shareImage",
+      columnId: "col-mod-share-image",
+      name: "Share Image",
+      type: "image",
+      aliases: ["Session Image", "Cover Image", "share_image", "session_image", "cover_image"],
+    },
     // the module's own quiz, written right under it (see parseQuizText)
     { key: "quiz", columnId: "col-mod-quiz", name: "Quiz", type: "text", aliases: ["Quiz Questions", "Questions"] },
     {
@@ -180,8 +203,12 @@ export interface CmsModule {
   unlocksCertificate: boolean;
   /** "Open" field: true/false set by the team; null (blank) = opens when the recording is up */
   open: boolean | null;
-  /** sharing the module's badge: handles to tag, and the team's own wording (may use {badge} {title} {week} {handles} {link}) */
-  share: { x: string; linkedin: string; text: string };
+  /**
+   * sharing the module's badge: the company's and the speaker's handles to tag,
+   * the team's own wording (may use {badge} {title} {week} {partner}), and the
+   * session image to post with
+   */
+  share: { x: string; linkedin: string; speakerX: string; speakerLinkedin: string; text: string; image: string | null };
   quizAttempts: number;
   /** null = every question must be correct */
   passMark: number | null;
@@ -555,7 +582,14 @@ async function load(): Promise<CmsModuleCatalog | null> {
       badgeImage: safeUrl(v.badgeImage, { allowRelative: true }) ?? DEFAULT_BADGE_IMAGE,
       unlocksCertificate: cmsBoolean(v.unlocksCertificate, false),
       open: v.open?.trim() ? cmsBoolean(v.open, false) : null,
-      share: { x: v.xHandles?.trim() ?? "", linkedin: v.linkedinHandles?.trim() ?? "", text: v.shareText?.trim() ?? "" },
+      share: {
+        x: v.xHandles?.trim() ?? "",
+        linkedin: v.linkedinHandles?.trim() ?? "",
+        speakerX: v.speakerXHandles?.trim() ?? "",
+        speakerLinkedin: v.speakerLinkedinHandles?.trim() ?? "",
+        text: v.shareText?.trim() ?? "",
+        image: safeUrl(v.shareImage, { allowRelative: true }),
+      },
       quizAttempts: Math.min(Math.max(Math.round(cmsNumber(v.quizAttempts, 3)), 1), 10),
       passMark: Number.isFinite(passMark) && passMark > 0 ? Math.round(passMark) : null,
       retryAfterHours: Math.min(Math.max(cmsNumber(v.retryAfterHours, DEFAULT_RETRY_AFTER_HOURS), 0), 24 * 30),

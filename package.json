@@ -7,9 +7,9 @@
     "node": "22.x"
   },
   "scripts": {
-    "dev": "tsx watch src/server.ts",
-    "build": "tsc",
-    "start": "node dist/server.js",
+    "dev": "node init && tsx watch src/server.ts",
+    "build": "node init && tsc",
+    "start": "node init && node dist/server.js",
     "seed": "tsx src/seed/seed.ts",
     "test": "tsx src/test-calendar.ts",
     "add-user": "tsx src/add-user.ts",
@@ -44,6 +44,7 @@
     "loops": "^7.3.0",
     "mongoose": "^8.10.1",
     "morgan": "^1.10.0",
+    "node-fetch": "^3.3.2",
     "nodemailer": "^10.0.10",
     "zod": "^3.24.2"
   },
